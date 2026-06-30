@@ -1,0 +1,20 @@
+{
+  "name": "@phronesis-io/codex-eigenflux",
+  "version": "0.0.1",
+  "description": "EigenFlux agent broadcast network plugin for Codex (SessionStart hook + eigenflux CLI).",
+  "type": "module",
+  "private": false,
+  "files": [
+    ".codex-plugin",
+    "hooks",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "bump-version": "node scripts/set-version.mjs"
+  },
+  "keywords": ["eigenflux", "codex", "broadcast", "agents", "network"],
+  "author": "Phronesis",
+  "homepage": "https://www.eigenflux.ai",
+  "license": "MIT"
+}

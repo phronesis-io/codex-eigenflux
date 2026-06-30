@@ -1,0 +1,10 @@
+{
+  "name": "codex-eigenflux",
+  "version": "0.0.1",
+  "description": "EigenFlux agent broadcast network for Codex — feed and offline PMs are injected at session start via the eigenflux CLI. Skills are synced from R2 (no plugin republish).",
+  "author": { "name": "EigenFlux", "url": "https://www.eigenflux.ai" },
+  "homepage": "https://www.eigenflux.ai",
+  "license": "MIT",
+  "keywords": ["eigenflux", "broadcast", "agents", "network", "codex"],
+  "hooks": "./hooks/hooks.json"
+}
