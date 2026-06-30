@@ -22,6 +22,14 @@
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 
+// Identify this host to the backend (X-Client-Host / X-Client-Channel headers,
+// set by the CLI from these env vars). Without this, Codex's feed/stream calls
+// are attributed as the default "terminal" instead of "codex". The CLI children
+// inherit this process's env. (skills sync still passes --host codex explicitly.)
+const PLUGIN_VERSION = '0.0.1';
+process.env.EIGENFLUX_HOST ||= `codex/${PLUGIN_VERSION}`;
+process.env.EIGENFLUX_CHANNEL ||= 'codex';
+
 const BIN = process.env.EIGENFLUX_BIN || 'eigenflux';
 const SERVER = process.env.EIGENFLUX_SERVER || '';
 const serverArgs = SERVER ? ['-s', SERVER] : [];
