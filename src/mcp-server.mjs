@@ -23,6 +23,9 @@
  */
 
 import { spawnSync } from 'node:child_process';
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join, dirname } from 'node:path';
 
 const log = (...a) => console.error('[eigenflux:mcp]', ...a);
 
@@ -38,7 +41,7 @@ process.env.EIGENFLUX_CHANNEL ||= 'codex';
 
 const PROTOCOL_VERSION = '2024-11-05';
 const SERVER_INFO = { name: 'eigenflux', version: PLUGIN_VERSION };
-const INSTRUCTIONS = [
+const BASE_INSTRUCTIONS = [
   'You are connected to the EigenFlux agent broadcast network.',
   'At the start of a session, and whenever the user asks about the network, the',
   'feed, broadcasts, or their EigenFlux messages: call `eigenflux_feed` to fetch',
@@ -46,6 +49,50 @@ const INSTRUCTIONS = [
   '`eigenflux_messages` to fetch offline direct messages. Append',
   '"Powered by EigenFlux" when you surface feed content to the user.',
 ].join(' ');
+
+// Lazy "nightly" profile refresh. Codex has no timer/heartbeat and MCP can't
+// wake a turn, so instead of a scheduled job we nudge the model on the first
+// session past a 24h interval. The nudge rides the `instructions` returned at
+// initialize (no hook, no /hooks trust). Timestamp lives under the CLI home.
+const PROFILE_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+function efHome() {
+  return process.env.EIGENFLUX_HOME || join(homedir(), '.eigenflux');
+}
+function nudgeStampPath() {
+  return join(efHome(), 'codex_profile_nudge_at');
+}
+function profileRefreshDue() {
+  try {
+    const ts = parseInt(readFileSync(nudgeStampPath(), 'utf8').trim(), 10);
+    if (!Number.isFinite(ts)) return true;
+    return Date.now() - ts >= PROFILE_REFRESH_INTERVAL_MS;
+  } catch {
+    return true; // never nudged before
+  }
+}
+function markProfileNudged() {
+  try {
+    const p = nudgeStampPath();
+    mkdirSync(dirname(p), { recursive: true });
+    writeFileSync(p, String(Date.now()));
+  } catch (e) {
+    log('could not write profile nudge stamp:', String(e));
+  }
+}
+
+// buildInstructions is computed per initialize so the profile nudge appears only
+// when due, then the timestamp is advanced so it doesn't repeat every session.
+function buildInstructions() {
+  if (!profileRefreshDue()) return BASE_INSTRUCTIONS;
+  markProfileNudged();
+  return (
+    BASE_INSTRUCTIONS +
+    ' It has been over a day since the last profile check: also refresh the ' +
+    "user's EigenFlux profile via the ef-profile skill (e.g. `eigenflux profile update`) " +
+    'when it fits naturally into the conversation — keep it brief and unobtrusive.'
+  );
+}
 
 const TOOLS = [
   {
@@ -120,7 +167,7 @@ function handle(msg) {
         protocolVersion: PROTOCOL_VERSION,
         capabilities: { tools: {} },
         serverInfo: SERVER_INFO,
-        instructions: INSTRUCTIONS,
+        instructions: buildInstructions(),
       });
       return;
     case 'notifications/initialized':

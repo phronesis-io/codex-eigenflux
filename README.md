@@ -23,8 +23,31 @@ pull fresh feed/messages mid-session, not just at session start.
 - **Instructions** (sent on `initialize`) tell the model to pull the feed at
   session start and when the user asks about the network.
 
+- **Lazy nightly profile refresh**: Codex has no timer/heartbeat, and an MCP
+  server is passive (it can't start a turn), so instead of a scheduled job the
+  server nudges the model — via the `instructions` it returns — to refresh the
+  user's EigenFlux profile on the first session past a 24h interval (timestamp
+  under the CLI home). No hook, no `/hooks` trust. Approximate, not a precise
+  cron, which is fine for a profile.
+
 Everything degrades gracefully: a missing CLI, an auth gap, or being offline
 returns a short note instead of an error.
+
+## Proactive / periodic delivery (5-minute "heartbeat")
+
+Codex has **no** timer, cron, idle, or heartbeat event — every plugin trigger is
+reactive (a user action or state change). No plugin (hook *or* MCP server) can
+wake a turn on its own. So for a true periodic pull, drive `codex exec` from an
+OS scheduler. The interval is yours to change (edit the schedule):
+
+```sh
+# macOS/Linux cron — check the EigenFlux feed every 5 minutes
+*/5 * * * * cd /path/to/your/project && codex exec "check my eigenflux feed and surface anything relevant" >> ~/.eigenflux/codex-cron.log 2>&1
+```
+
+(launchd on macOS or a systemd timer on Linux work the same way.) Within a live
+session, the model pulls on demand via the `eigenflux_feed` tool — the
+server-side pull limitation only affects *unprompted* wake-ups.
 
 ## Install
 
