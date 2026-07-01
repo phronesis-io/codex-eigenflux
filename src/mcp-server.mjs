@@ -22,7 +22,7 @@
  * No build step: plain Node ESM. Codex users need only `node`.
  */
 
-import { spawnSync } from 'node:child_process';
+import { spawnSync, execFile } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -81,17 +81,28 @@ function markProfileNudged() {
   }
 }
 
-// buildInstructions is computed per initialize so the profile nudge appears only
-// when due, then the timestamp is advanced so it doesn't repeat every session.
+// Filled asynchronously by bootstrap() so the JSON-RPC handshake is never blocked
+// by a network call; read by buildInstructions on each initialize.
+let cliOutdated = false;
+let latestVersion = '';
+
+// buildInstructions is computed per initialize so the (conditional) nudges appear
+// only when due; the profile timestamp is advanced so it doesn't repeat.
 function buildInstructions() {
-  if (!profileRefreshDue()) return BASE_INSTRUCTIONS;
-  markProfileNudged();
-  return (
-    BASE_INSTRUCTIONS +
-    ' It has been over a day since the last profile check: also refresh the ' +
-    "user's EigenFlux profile via the ef-profile skill (e.g. `eigenflux profile update`) " +
-    'when it fits naturally into the conversation — keep it brief and unobtrusive.'
-  );
+  let ins = BASE_INSTRUCTIONS;
+  if (cliOutdated) {
+    ins +=
+      ` Note: the EigenFlux CLI is out of date${latestVersion ? ` (latest ${latestVersion})` : ''};` +
+      ' suggest the user upgrade it: curl -fsSL https://www.eigenflux.ai/install.sh | sh.';
+  }
+  if (profileRefreshDue()) {
+    markProfileNudged();
+    ins +=
+      ' It has been over a day since the last profile check: also refresh the' +
+      " user's EigenFlux profile via the ef-profile skill (e.g. `eigenflux profile update`)" +
+      ' when it fits naturally into the conversation — keep it brief and unobtrusive.';
+  }
+  return ins;
 }
 
 const TOOLS = [
@@ -223,11 +234,35 @@ process.stdin.on('end', () => process.exit(0));
 process.on('SIGINT', () => process.exit(0));
 process.on('SIGTERM', () => process.exit(0));
 
-// Startup bootstrap: refresh skills (best-effort, off the JSON-RPC path).
-const sync = runCli(['skills', 'sync', '--quiet', '--if-stale', '--host', 'codex'], 20000);
-if (sync.error && sync.error.code === 'ENOENT') {
-  log('eigenflux CLI not installed; feed/messages tools will report install instructions');
-} else {
-  log('skills sync:', sync.status === 0 ? 'ok' : `exit ${sync.status}`);
+// Startup bootstrap — ASYNC and fire-and-forget so it never blocks the JSON-RPC
+// handshake (a blocking spawnSync here would delay `initialize` by the network
+// timeout). Refreshes skills, then checks for an outdated CLI so the next
+// initialize can nudge an upgrade (no hook, no trust flow needed).
+function execAsync(args, cb) {
+  execFile(BIN, args, { encoding: 'utf8', timeout: 20000, maxBuffer: 10 * 1024 * 1024 }, cb);
 }
+
+function bootstrap() {
+  execAsync(['skills', 'sync', '--quiet', '--if-stale', '--host', 'codex'], (err) => {
+    if (err && err.code === 'ENOENT') {
+      log('eigenflux CLI not installed; tools will report install instructions');
+      return; // nothing else works without the CLI
+    }
+    log('skills sync done');
+    // Best-effort version/outdated check for the instruction nudge.
+    execAsync(['doctor', '-f', 'json'], (derr, stdout) => {
+      if (derr && !stdout) return; // doctor exits non-zero on issues but still prints JSON
+      try {
+        const d = JSON.parse(stdout);
+        cliOutdated = d.outdated === true;
+        latestVersion = d.latest_version || '';
+        if (cliOutdated) log(`CLI outdated (latest ${latestVersion})`);
+      } catch {
+        /* ignore */
+      }
+    });
+  });
+}
+
+bootstrap();
 log('ready');
