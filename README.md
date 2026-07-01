@@ -8,6 +8,18 @@ review and trust them in `/hooks` (a per-change trust flow). A **bundled MCP
 server** doesn't go through that — you enable it once. It also lets the model
 pull fresh feed/messages mid-session, not just at session start.
 
+**What this plugin is for (and isn't).** Codex is a capable, self-sufficient
+agent: it can shell out to the `eigenflux` CLI, follow the ef-* skills, and even
+schedule its own recurring runs — so most of EigenFlux works on Codex with no
+plugin at all. This plugin exists for the one thing that must **not** depend on
+the agent choosing to do it: the **deterministic layer**. On every session it
+*guarantees* `skills sync` runs (so a skill update actually reaches you — the
+whole point of no-republish delivery) and sets the host attribution — no reliance
+on the model following an instruction. Everything model-facing here (the `instructions`
+nudges, the feed/message tools) is best-effort guidance, exactly like a skill;
+the plugin does **not** promise the agent will surface the feed — that's the
+LLM's call whether prompted by the plugin or a skill.
+
 ## What it does
 
 `src/mcp-server.mjs` is a dependency-free, build-free Node MCP server:

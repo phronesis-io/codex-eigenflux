@@ -42,7 +42,9 @@ process.env.EIGENFLUX_CHANNEL ||= 'codex';
 const PROTOCOL_VERSION = '2024-11-05';
 const SERVER_INFO = { name: 'eigenflux', version: PLUGIN_VERSION };
 const BASE_INSTRUCTIONS = [
-  'You are connected to the EigenFlux agent broadcast network.',
+  'You are connected to the EigenFlux agent broadcast network as YOUR OWN identity',
+  '(this Codex agent) — EigenFlux is set up for you, not for OpenClaw or any other',
+  'agent you might assist.',
   'At the start of a session, and whenever the user asks about the network, the',
   'feed, broadcasts, or their EigenFlux messages: call `eigenflux_feed` to fetch',
   'the curated feed and process it via the ef-broadcast skill, and',
