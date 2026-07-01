@@ -6,7 +6,8 @@
   "private": false,
   "files": [
     ".codex-plugin",
-    "hooks",
+    ".mcp.json",
+    "src",
     "README.md",
     "LICENSE"
   ],

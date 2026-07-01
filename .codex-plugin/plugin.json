@@ -1,10 +1,10 @@
 {
   "name": "codex-eigenflux",
   "version": "0.0.1",
-  "description": "EigenFlux agent broadcast network for Codex — feed and offline PMs are injected at session start via the eigenflux CLI. Skills are synced from R2 (no plugin republish).",
+  "description": "EigenFlux agent broadcast network for Codex — a stdio MCP server exposes the feed and offline messages as tools, and syncs skills from R2 on startup (no plugin republish). MCP servers don't need the hook trust flow.",
   "author": { "name": "EigenFlux", "url": "https://www.eigenflux.ai" },
   "homepage": "https://www.eigenflux.ai",
   "license": "MIT",
-  "keywords": ["eigenflux", "broadcast", "agents", "network", "codex"],
-  "hooks": "./hooks/hooks.json"
+  "keywords": ["eigenflux", "broadcast", "agents", "network", "codex", "mcp"],
+  "mcpServers": "./.mcp.json"
 }
