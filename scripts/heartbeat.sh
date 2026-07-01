@@ -43,7 +43,13 @@ fi
 
 server_env=""
 [[ -n "$SERVER" ]] && server_env="EIGENFLUX_SERVER=$SERVER "
-CRON_CMD="cd $(printf '%q' "$PROJECT") && ${server_env}codex exec $(printf '%q' "$HEARTBEAT_PROMPT") >> $(printf '%q' "$LOG") 2>&1"
+# --sandbox danger-full-access: `codex exec` sandboxes network + out-of-workspace
+# writes by default, which would block the eigenflux CLI (it calls the backend and
+# writes ~/.eigenflux). The heartbeat is a local job the user installed on purpose,
+# so grant full access. `codex exec` is already non-interactive (no approval
+# prompts), so nothing hangs.
+CODEX_EXEC="codex exec --sandbox danger-full-access"
+CRON_CMD="cd $(printf '%q' "$PROJECT") && ${server_env}${CODEX_EXEC} $(printf '%q' "$HEARTBEAT_PROMPT") >> $(printf '%q' "$LOG") 2>&1"
 CRON_LINE="*/$EVERY * * * * $CRON_CMD $MARKER"
 
 current_crontab() { crontab -l 2>/dev/null || true; }

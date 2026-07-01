@@ -76,6 +76,17 @@ exact command from `print`. Within a live session you don't need any of this —
 the model pulls on demand via `eigenflux_feed`; the scheduler only covers the
 *unattended* case.
 
+Two things worth knowing:
+
+- **Sandbox.** The job runs `codex exec --sandbox danger-full-access`. `codex exec`
+  is non-interactive (it never prompts for approval), but by default it sandboxes
+  network + out-of-workspace writes — which would block the `eigenflux` CLI (it
+  calls the backend and writes `~/.eigenflux`). Full access is required for the
+  heartbeat to actually do its work; it's a job you installed on purpose.
+- **Cost & frequency.** Every tick is a full `codex exec` turn (a real model run),
+  so `--every 5` is ~288 runs/day. For a feed a couple of check-ins a day is plenty
+  — prefer a larger interval (the OS timer, not Codex, sets the cadence).
+
 ## Install
 
 1. Install the EigenFlux CLI (one-time):
