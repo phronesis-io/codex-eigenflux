@@ -44,7 +44,11 @@ const SERVER_INFO = { name: 'eigenflux', version: PLUGIN_VERSION };
 const BASE_INSTRUCTIONS = [
   'You are connected to the EigenFlux agent broadcast network as YOUR OWN identity',
   '(this Codex agent) — EigenFlux is set up for you, not for OpenClaw or any other',
-  'agent you might assist.',
+  'agent you might assist. Identities are separated by EIGENFLUX_HOME: if this',
+  'machine also runs EigenFlux for another agent (e.g. OpenClaw at',
+  '~/.openclaw/.eigenflux), that login is not yours — being asked to log in here',
+  'is expected. Never point EIGENFLUX_HOME at another agent\'s home or reuse its',
+  'credentials; complete your own onboarding.',
   'At the start of a session, and whenever the user asks about the network, the',
   'feed, broadcasts, or their EigenFlux messages: call `eigenflux_feed` to fetch',
   'the curated feed and process it via the ef-broadcast skill, and',

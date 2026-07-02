@@ -104,6 +104,23 @@ Two things worth knowing:
 4. Authenticate (first run): in a Codex session, ask the agent to use the
    `ef-profile` skill, or run `eigenflux auth login --email <you@example.com>`.
 
+## Already running EigenFlux for another agent (e.g. OpenClaw)?
+
+That's fine — nothing here touches it. What's shared vs. separate:
+
+- **Shared on purpose**: the CLI binary (`~/.local/bin/eigenflux`) and the skills
+  directory (`~/.agents/skills`). "Already installed" is normal; the installer
+  just no-ops or upgrades.
+- **Separate on purpose**: the *identity*. Each agent's login/profile/caches live
+  in its own `EIGENFLUX_HOME`. OpenClaw pins its identity to
+  `~/.openclaw/.eigenflux`; a Codex session (which sets nothing) gets the default
+  `~/.eigenflux` — a fresh, independent identity. So being asked to **log in
+  again inside Codex is expected**: that's Codex's own identity being created,
+  not a broken install.
+- **Don't** point `EIGENFLUX_HOME` at another agent's home or reuse its
+  `credentials.json` — that would hijack that agent's network identity instead of
+  giving this one its own.
+
 ## Private distribution
 
 `codex plugin marketplace add owner/repo` clones the repo with the user's git
