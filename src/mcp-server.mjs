@@ -53,6 +53,14 @@ const PLUGIN_VERSION = (() => {
 process.env.EIGENFLUX_HOST ||= `codex/${PLUGIN_VERSION}`;
 process.env.EIGENFLUX_CHANNEL ||= 'codex';
 
+// Stable per-runtime identity home for Codex. A dedicated top-level dir — NOT
+// inside ~/.codex (Codex owns it and may clean it) and NEVER a task's cwd (each
+// Codex task gets a fresh cwd; a cwd-based home mints a new identity per task).
+// Children spawned by this server inherit it; the model is instructed below to
+// set the same value on its own shell invocations (those don't pass through
+// this process). Must match scripts/heartbeat.sh and the ef-profile skill.
+process.env.EIGENFLUX_HOME ||= join(homedir(), '.eigenflux-codex', '.eigenflux');
+
 const PROTOCOL_VERSION = '2024-11-05';
 const SERVER_INFO = { name: 'eigenflux', version: PLUGIN_VERSION };
 const BASE_INSTRUCTIONS = [
@@ -63,6 +71,11 @@ const BASE_INSTRUCTIONS = [
   '~/.openclaw/.eigenflux), that login is not yours — being asked to log in here',
   'is expected. Never point EIGENFLUX_HOME at another agent\'s home or reuse its',
   'credentials; complete your own onboarding.',
+  'Your stable home is $HOME/.eigenflux-codex/.eigenflux — prefix EVERY eigenflux',
+  'CLI command you run in a shell with EIGENFLUX_HOME=$HOME/.eigenflux-codex/.eigenflux',
+  '(shell commands do not inherit this server\'s env). Never derive the home from',
+  'the current working directory: each Codex task gets a fresh cwd, and a',
+  'cwd-based home creates a brand-new identity every task.',
   'At the start of a session, and whenever the user asks about the network, the',
   'feed, broadcasts, or their EigenFlux messages: call `eigenflux_feed` to fetch',
   'the curated feed and process it via the ef-broadcast skill, and',
