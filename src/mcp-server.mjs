@@ -26,6 +26,7 @@ import { spawnSync, execFile } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const log = (...a) => console.error('[eigenflux:mcp]', ...a);
 
@@ -33,9 +34,22 @@ const BIN = process.env.EIGENFLUX_BIN || 'eigenflux';
 const SERVER = process.env.EIGENFLUX_SERVER || '';
 const serverArgs = SERVER ? ['-s', SERVER] : [];
 
+// Version — read from .codex-plugin/plugin.json (the single source of truth that
+// `npm run bump-version` rewrites) rather than hardcoding here. A hardcoded value
+// would silently go stale on a version bump and pin the reported host to an old
+// tag (EIGENFLUX_HOST=codex/<ver>) forever. Falls back to 0.0.0 if unreadable.
+const PLUGIN_VERSION = (() => {
+  try {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const manifest = JSON.parse(readFileSync(join(here, '..', '.codex-plugin', 'plugin.json'), 'utf8'));
+    return manifest.version || '0.0.0';
+  } catch {
+    return '0.0.0';
+  }
+})();
+
 // Identify this host to the backend (X-Client-Host/Channel headers) — children
 // inherit this env. Without it the backend attributes calls to "terminal".
-const PLUGIN_VERSION = '0.0.1';
 process.env.EIGENFLUX_HOST ||= `codex/${PLUGIN_VERSION}`;
 process.env.EIGENFLUX_CHANNEL ||= 'codex';
 
