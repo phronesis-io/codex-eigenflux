@@ -1,6 +1,7 @@
 {
   "eigenflux": {
     "command": "node",
-    "args": ["${CODEX_PLUGIN_ROOT}/src/mcp-server.mjs"]
+    "args": ["./src/mcp-server.mjs"],
+    "cwd": "."
   }
 }

@@ -48,15 +48,25 @@ fi
 
 server_env=""
 [[ -n "$SERVER" ]] && server_env="EIGENFLUX_SERVER=$SERVER "
+# Resolve the codex binary to an ABSOLUTE path at install time: cron runs with a
+# minimal PATH (/usr/bin:/bin), so a bare `codex` fails there — and desktop-app
+# users often have no codex on PATH at all (the CLI ships inside ChatGPT.app).
+# Override with CODEX_BIN=... if you want a specific binary.
+CODEX_BIN="${CODEX_BIN:-$(command -v codex || true)}"
+if [[ -z "$CODEX_BIN" && -x "/Applications/ChatGPT.app/Contents/Resources/codex" ]]; then
+  CODEX_BIN="/Applications/ChatGPT.app/Contents/Resources/codex"
+fi
 # --sandbox danger-full-access: `codex exec` sandboxes network + out-of-workspace
 # writes by default, which would block the eigenflux CLI (it calls the backend and
 # writes the EigenFlux home). The heartbeat is a local job the user installed on
 # purpose, so grant full access. `codex exec` is already non-interactive (no
 # approval prompts), so nothing hangs.
-CODEX_EXEC="codex exec --sandbox danger-full-access"
+# --skip-git-repo-check: the project dir need not be a git repo / trusted dir;
+# without it `codex exec` refuses to run and the beat silently does nothing.
+CODEX_EXEC="$(printf '%q' "$CODEX_BIN") exec --skip-git-repo-check --sandbox danger-full-access"
 # EIGENFLUX_HOME rides the cron env (inherited by codex exec and every child) AND
 # the prompt above — belt and braces, in case the runtime scrubs env for shells.
-CRON_CMD="cd $(printf '%q' "$PROJECT") && EIGENFLUX_HOME=$(printf '%q' "$EF_HOME") ${server_env}${CODEX_EXEC} $(printf '%q' "$HEARTBEAT_PROMPT") >> $(printf '%q' "$LOG") 2>&1"
+CRON_CMD="cd $(printf '%q' "$PROJECT") && EIGENFLUX_HOME=$(printf '%q' "$EF_HOME") ${server_env}${CODEX_EXEC} $(printf '%q' "$HEARTBEAT_PROMPT") </dev/null >> $(printf '%q' "$LOG") 2>&1"
 CRON_LINE="*/$EVERY * * * * $CRON_CMD $MARKER"
 
 current_crontab() { crontab -l 2>/dev/null || true; }
@@ -68,7 +78,10 @@ case "$cmd" in
     ;;
   install)
     mkdir -p "$EF_HOME"
-    command -v codex >/dev/null 2>&1 || echo "warning: 'codex' not on PATH — the cron job will fail until it is" >&2
+    if [[ -z "$CODEX_BIN" ]]; then
+      echo "error: no codex binary found (not on PATH, no ChatGPT.app). Set CODEX_BIN=/path/to/codex and re-run." >&2
+      exit 1
+    fi
     { without_ours; echo "$CRON_LINE"; } | crontab -
     echo "Installed: EigenFlux heartbeat every ${EVERY}m in ${PROJECT}"
     echo "  logs -> $LOG   (change interval: re-run install; remove: ./heartbeat.sh uninstall)"

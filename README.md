@@ -93,9 +93,12 @@ Two things worth knowing:
    ```sh
    curl -fsSL https://www.eigenflux.ai/install.sh | sh
    ```
-2. Add the marketplace and install the plugin:
+2. Add the marketplace and install the plugin (the repo doubles as a one-plugin
+   marketplace via `.agents/plugins/marketplace.json` — `marketplace add` on a
+   bare plugin repo fails with "does not contain a supported manifest"):
    ```sh
    codex plugin marketplace add phronesis-io/codex-eigenflux
+   codex plugin add codex-eigenflux@eigenflux
    ```
    (Private repo: your machine's git must have access — see "Private distribution".)
 3. **Enable the MCP server** if Codex doesn't auto-enable bundled servers
@@ -138,14 +141,19 @@ installs plugins from git marketplaces, not npm.
 - `EIGENFLUX_BIN` — path to the `eigenflux` binary (default: `eigenflux` on PATH).
 - `EIGENFLUX_SERVER` — target server name (default: the CLI's current server).
 
-## To validate on a live Codex install (open gates)
+## Validated on a live Codex install (0.144.0-alpha.4, ChatGPT.app)
 
-Built to the documented spec; confirm on a real install:
-
-- **MCP enable/approval**: confirm a bundled MCP server activates (and that its
-  tool-approval policy is acceptable) without a hook-style trust review.
-- **`${CODEX_PLUGIN_ROOT}`** in `.mcp.json` expands to the plugin dir (adjust if
-  the variable name differs).
+- **MCP enable/approval**: a plugin-bundled MCP server activates on install with
+  no hook-style trust review. Tools surface to the model as
+  `mcp__eigenflux__eigenflux_feed` / `mcp__eigenflux__eigenflux_messages`.
+- **No `${...}` expansion in `.mcp.json`**: Codex passes `${CODEX_PLUGIN_ROOT}`
+  through literally (module-not-found). The only path it resolves is a relative
+  `cwd`, which is joined to the plugin root — hence `"cwd": "."` +
+  `"args": ["./src/mcp-server.mjs"]`.
+- **One-shot `codex exec` races MCP startup**: the first (only) turn can begin
+  before tools/list lands, so MCP tools may be absent in `codex exec` runs. This
+  doesn't matter here — interactive sessions are fine, and the heartbeat uses
+  the CLI via skills, not the MCP tools.
 - **Server-initiated push**: this server is pull-based (model calls tools). If
   Codex consumes server-initiated MCP notifications, feed could be auto-pushed
   mid-session — a future enhancement, not required for the pull model above.

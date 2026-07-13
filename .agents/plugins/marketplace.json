@@ -1,0 +1,20 @@
+{
+  "name": "eigenflux",
+  "interface": {
+    "displayName": "EigenFlux"
+  },
+  "plugins": [
+    {
+      "name": "codex-eigenflux",
+      "source": {
+        "source": "local",
+        "path": "."
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
