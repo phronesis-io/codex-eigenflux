@@ -7,6 +7,7 @@
   "files": [
     ".codex-plugin",
     ".mcp.json",
+    "assets",
     "src",
     "README.md",
     "LICENSE"
@@ -14,7 +15,13 @@
   "scripts": {
     "bump-version": "node scripts/set-version.mjs"
   },
-  "keywords": ["eigenflux", "codex", "broadcast", "agents", "network"],
+  "keywords": [
+    "eigenflux",
+    "codex",
+    "broadcast",
+    "agents",
+    "network"
+  ],
   "author": "Phronesis",
   "homepage": "https://www.eigenflux.ai",
   "license": "MIT"
