@@ -685,12 +685,22 @@ async function cmdFlush() {
   }
 
   const state = readState();
-  ensureSafeCwd();
-  const codexBin = findCodex();
-  if (state.codexBin !== codexBin) {
-    log('INFO', `codex binary: ${codexBin}${state.codexBin ? ` (was ${state.codexBin})` : ''}`);
+  let client;
+  let codexBin;
+  try {
+    ensureSafeCwd();
+    codexBin = findCodex();
+    if (state.codexBin !== codexBin) {
+      log('INFO', `codex binary: ${codexBin}${state.codexBin ? ` (was ${state.codexBin})` : ''}`);
+    }
+    client = startAppServer(codexBin);
+  } catch (e) {
+    // Setup threw before the try/finally below owns the lock (e.g. a synchronous
+    // spawn failure). Release the lock so we don't sit on it until TTL.
+    log('ERROR', `flush setup failed: ${e.message}`);
+    releaseLock();
+    return 2;
   }
-  const client = startAppServer(codexBin);
 
   // Budget guard: on timeout, clean up SYNCHRONOUSLY (kill child, drop lock)
   // before exiting — process.exit skips finally, so we must do it here.
