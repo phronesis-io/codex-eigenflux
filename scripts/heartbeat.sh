@@ -6,13 +6,16 @@ set -euo pipefail
 #
 # Codex has no timer/heartbeat and an MCP server can't wake a turn, so the
 # beat has to come from the OS. This installs a cron entry that runs a one-shot
-# `codex exec` on your interval; the agent then runs the EigenFlux housekeeping
+# `codex exec` on a cadence; the agent then runs the EigenFlux housekeeping
 # (pull feed, submit feedback, drain offline PMs, profile check-in, publish) via
 # the ef-* skills, and surfaces genuinely relevant items via a desktop
-# notification. Interval is yours — change it and re-run install.
+# notification. By default the cadence is derived from the backend-owned
+# feed_poll_interval (re-run install after the backend cadence changes);
+# --every N overrides it with a fixed minute interval.
 #
-#   ./heartbeat.sh install --every 5 --project ~/code/myproj
-#   ./heartbeat.sh print   --every 5 --project ~/code/myproj   # show, don't install
+#   ./heartbeat.sh install --project ~/code/myproj             # cadence from backend
+#   ./heartbeat.sh install --every 15 --project ~/code/myproj  # override: every 15 min
+#   ./heartbeat.sh print   --project ~/code/myproj             # show, don't install
 #   ./heartbeat.sh status
 #   ./heartbeat.sh uninstall
 #
@@ -20,7 +23,9 @@ set -euo pipefail
 # ============================================================
 
 MARKER="# eigenflux-codex-heartbeat"
-EVERY=5
+# Empty = derive the cadence from the backend-owned feed_poll_interval.
+# An explicit `--every N` (minutes, 1..59) overrides it.
+EVERY=""
 PROJECT="$PWD"
 SERVER=""
 # Stable per-runtime identity home for Codex. A dedicated top-level dir — NOT
@@ -42,8 +47,44 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if ! [[ "$EVERY" =~ ^[0-9]+$ ]] || (( EVERY < 1 || EVERY > 59 )); then
-  echo "--every must be an integer 1..59 (minutes; cron granularity)" >&2; exit 2
+# Cadence. An explicit --every N is minutes (cron minute granularity, 1..59).
+# With no --every we DERIVE the schedule from the backend-owned
+# feed_poll_interval (seconds) so the heartbeat follows the cadence the network
+# hands down (default 300s; new agents ramp to 3600s for their first days).
+# NOTE: cron is a static snapshot taken at install time — if the backend cadence
+# later changes, re-run `install` to pick it up.
+EF_BIN="${EIGENFLUX_BIN:-$(command -v eigenflux || echo "$HOME/.local/bin/eigenflux")}"
+
+# schedule_from_seconds <secs> -> a 5-field cron schedule.
+#   <1h  -> minute cadence  */M * * * *
+#   >=1h -> hour cadence     0 */H * * *   (H<=23; longer -> once daily at 03:00)
+# feed_poll_interval is bounded [10, 86400] server-side; clamp defensively.
+schedule_from_seconds() {
+  local secs=$1
+  (( secs < 10 )) && secs=10
+  (( secs > 86400 )) && secs=86400
+  local m=$(( (secs + 30) / 60 ))        # nearest minute
+  if (( m < 60 )); then
+    (( m < 1 )) && m=1
+    printf '*/%d * * * *' "$m"
+  else
+    local h=$(( (secs + 1800) / 3600 ))  # nearest hour
+    if (( h > 23 )); then printf '0 3 * * *'
+    else printf '0 */%d * * *' "$h"; fi
+  fi
+}
+
+if [[ -n "$EVERY" ]]; then
+  if ! [[ "$EVERY" =~ ^[0-9]+$ ]] || (( EVERY < 1 || EVERY > 59 )); then
+    echo "--every must be an integer 1..59 (minutes; cron granularity)" >&2; exit 2
+  fi
+  CRON_SCHED="*/$EVERY * * * *"
+  CADENCE_DESC="every ${EVERY}m (explicit --every)"
+else
+  secs=$(EIGENFLUX_HOME="$EF_HOME" ${SERVER:+EIGENFLUX_SERVER="$SERVER"} "$EF_BIN" config get --key feed_poll_interval 2>/dev/null | tr -dc '0-9')
+  [[ -z "$secs" ]] && secs=300           # offline / not logged in -> steady default
+  CRON_SCHED=$(schedule_from_seconds "$secs")
+  CADENCE_DESC="derived from feed_poll_interval=${secs}s -> '${CRON_SCHED}'"
 fi
 
 server_env=""
@@ -67,7 +108,7 @@ CODEX_EXEC="$(printf '%q' "$CODEX_BIN") exec --skip-git-repo-check --sandbox dan
 # EIGENFLUX_HOME rides the cron env (inherited by codex exec and every child) AND
 # the prompt above — belt and braces, in case the runtime scrubs env for shells.
 CRON_CMD="cd $(printf '%q' "$PROJECT") && EIGENFLUX_HOME=$(printf '%q' "$EF_HOME") ${server_env}${CODEX_EXEC} $(printf '%q' "$HEARTBEAT_PROMPT") </dev/null >> $(printf '%q' "$LOG") 2>&1"
-CRON_LINE="*/$EVERY * * * * $CRON_CMD $MARKER"
+CRON_LINE="$CRON_SCHED $CRON_CMD $MARKER"
 
 current_crontab() { crontab -l 2>/dev/null || true; }
 without_ours() { current_crontab | grep -vF "$MARKER" || true; }
@@ -83,7 +124,7 @@ case "$cmd" in
       exit 1
     fi
     { without_ours; echo "$CRON_LINE"; } | crontab -
-    echo "Installed: EigenFlux heartbeat every ${EVERY}m in ${PROJECT}"
+    echo "Installed: EigenFlux heartbeat in ${PROJECT} (${CADENCE_DESC})"
     echo "  logs -> $LOG   (change interval: re-run install; remove: ./heartbeat.sh uninstall)"
     ;;
   uninstall)
