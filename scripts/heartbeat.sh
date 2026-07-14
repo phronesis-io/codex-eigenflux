@@ -50,7 +50,8 @@ done
 # Cadence. An explicit --every N is minutes (cron minute granularity, 1..59).
 # With no --every we DERIVE the schedule from the backend-owned
 # feed_poll_interval (seconds) so the heartbeat follows the cadence the network
-# hands down (default 300s; new agents ramp to 3600s for their first days).
+# hands down (backend default 300s; new agents ramp to 3600s for their first
+# days). If that value isn't cached locally yet, we default to hourly.
 # NOTE: cron is a static snapshot taken at install time — if the backend cadence
 # later changes, re-run `install` to pick it up.
 EF_BIN="${EIGENFLUX_BIN:-$(command -v eigenflux || echo "$HOME/.local/bin/eigenflux")}"
@@ -90,12 +91,19 @@ else
   # missing (a failed exec makes the pipe non-zero); offline/logged-out returns
   # rc0+empty and is handled the same way below.
   secs=$(env "${ef_env[@]}" "$EF_BIN" config get --key feed_poll_interval 2>/dev/null | tr -dc '0-9') || secs=""
-  # Accept only a plain decimal; empty / offline / garbage -> steady default.
-  # 10# forces base-10 so a leading zero is never parsed as octal.
-  [[ "$secs" =~ ^[0-9]+$ ]] || secs=300
-  secs=$((10#$secs))
+  if [[ "$secs" =~ ^[0-9]+$ ]]; then
+    secs=$((10#$secs))                 # 10# = base-10, so a leading zero isn't octal
+    cadence_src="feed_poll_interval=${secs}s"
+  else
+    # Backend value not cached locally yet (fresh login / offline / logged out).
+    # Default to HOURLY, not 5-minutely: it's the conservative choice (new
+    # accounts ramp to 3600s anyway, so this never floods a fresh one), and once
+    # the local config syncs the real value a re-install adopts it automatically.
+    secs=3600
+    cadence_src="feed_poll_interval unavailable, default ${secs}s"
+  fi
   CRON_SCHED=$(schedule_from_seconds "$secs")
-  CADENCE_DESC="derived from feed_poll_interval=${secs}s -> '${CRON_SCHED}'"
+  CADENCE_DESC="derived from ${cadence_src} -> '${CRON_SCHED}'"
 fi
 
 server_env=""
