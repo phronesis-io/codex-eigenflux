@@ -177,12 +177,11 @@ node_bin=$q_node
 if command -v "\$node_bin" >/dev/null 2>&1 || [ -x "\$node_bin" ]; then
   if [ "\$rc" -ne 0 ]; then
     "\$node_bin" $q_sink append --title "EigenFlux heartbeat 执行失败 rc=\$rc" --text "codex exec 退出码 \$rc，详见 cron 日志" || echo "sink append failed" >&2
-  elif [ -s "\$LAST" ] && ! grep -qiE '^\s*(NO_REPLY)?\s*\$' "\$LAST"; then
-    "\$node_bin" $q_sink append --title "EigenFlux heartbeat" --file "\$LAST" || echo "sink append failed" >&2
   else
-    # rc=0 with empty / NO_REPLY output = a quiet beat; record it as such so
-    # the daily log folds it into one "心跳静默 ×N" line instead of dropping it.
-    "\$node_bin" $q_sink append --quiet --title "EigenFlux heartbeat (quiet)" || echo "sink append failed" >&2
+    # Always hand the full output to the sink and let it decide quiet vs real
+    # (its whole-string NO_REPLY/empty test is correct; a line-based shell grep
+    # would misjudge any multi-line result containing a blank line as quiet).
+    "\$node_bin" $q_sink append --title "EigenFlux heartbeat" --file "\$LAST" || echo "sink append failed" >&2
   fi
   "\$node_bin" $q_sink flush || echo "sink flush failed rc=\$?" >&2
 else

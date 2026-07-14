@@ -28,6 +28,10 @@
  *
  * Zero-dependency plain Node ESM (crypto is built-in). Same style as
  * mcp-server.mjs. Commands: append | flush | status | selfcheck
+ *
+ * Exit codes (the contract for cron/callers): 0 ok · 1 unhandled · 2 transient
+ * failure (retry, spool intact) · 3 flush budget timeout · 4 protocol drift
+ * (stop injecting, needs human) · selfcheck: 0 ok / 4 failed.
  */
 
 import { spawn } from 'node:child_process';
@@ -111,7 +115,7 @@ function redact(text) {
 function neutralizeMarkers(text, nonce) {
   return String(text)
     .replace(/<<</g, '‹‹‹').replace(/>>>/g, '›››')
-    .replace(new RegExp(nonce, 'g'), '·')
+    .split(nonce).join('·') // literal split, not a regex built from a variable
     .replace(/(^|\n)(\[EigenFlux\])/g, '$1[eigenflux]');
 }
 
@@ -163,6 +167,10 @@ function readState() {
       try { rec = JSON.parse(lines[i]); } catch { continue; }
       if (rec && rec.threadId) {
         log('INFO', `state recovered from chain ledger: seq=${rec.seq} thread=${rec.threadId}`);
+        // itemCount in the ledger is the volume's opening count (1), not its
+        // running total, so it's unreliable after recovery — rotation then
+        // relies on the byte-size fallback (rolloutSize > MAX_BYTES), which is
+        // recovered accurately via rolloutPath.
         return {
           seq: rec.seq || 0, threadId: rec.threadId, day: rec.day, part: rec.part || 1,
           itemCount: rec.itemCount || 0, rolloutPath: rec.rolloutPath || null,
@@ -613,7 +621,7 @@ function ensureSafeCwd() {
   // cwd must stay inert: codex loads context files (AGENTS.md etc.) from it.
   // Quarantine anything that isn't ours out of the directory entirely.
   const quarantine = join(SINK_HOME, 'quarantine');
-  for (const n of readdirSync(CWD_DIR).filter((x) => /\.(md|markdown)$/i.test(x) || x === 'AGENTS.md')) {
+  for (const n of readdirSync(CWD_DIR).filter((x) => /\.(md|markdown|mdc)$/i.test(x) || /^agents\.md$/i.test(x))) {
     try {
       mkdirSync(quarantine, { recursive: true, mode: 0o700 });
       renameSync(join(CWD_DIR, n), join(quarantine, `${Date.now()}-${n}`));
@@ -687,7 +695,16 @@ async function cmdFlush() {
   // Budget guard: on timeout, clean up SYNCHRONOUSLY (kill child, drop lock)
   // before exiting — process.exit skips finally, so we must do it here.
   const budget = setTimeout(() => {
+    // process.exit skips finally, so clean up + record the failure synchronously.
+    // A timeout is the most alert-worthy failure (app-server hung); don't let it
+    // slip past the consecutiveFailures counter that drives notifications.
     log('ERROR', `flush exceeded ${FLUSH_BUDGET_MS}ms; aborting (spool intact): ${client.stderrTail()}`);
+    state.consecutiveFailures = (state.consecutiveFailures || 0) + 1;
+    state.lastErrorAt = new Date().toISOString();
+    state.lastError = `TIMEOUT: flush exceeded ${FLUSH_BUDGET_MS}ms`;
+    try { writeState(state); } catch { /* best effort */ }
+    const n = state.consecutiveFailures;
+    if (n === 3 || (n > 3 && n % NOTIFY_EVERY === 0)) notifyUser(`EigenFlux Codex 日志已连续 ${n} 次写入超时（app-server 疑似卡死）`);
     client.kill();
     releaseLock();
     process.exit(3);
@@ -714,20 +731,22 @@ async function cmdFlush() {
     for (const batch of batches) {
       await client.request('thread/inject_items', { threadId, items: batch.map((x) => x.item) });
       batch.forEach((x) => x.ids.forEach((id) => flushedIds.add(id)));
+      compactSpool(flushedIds); // land each batch durably first; only then count it (a compact failure won't leave itemCount ahead of the spool → no re-inject + double-count)
       injected += batch.length;
       state.itemCount = (state.itemCount || 0) + batch.length;
-      compactSpool(flushedIds); // land each batch durably; a later batch failing won't re-inject earlier ones
     }
     state.userAgent = ua;
     state.codexBin = codexBin;
     state.lastSuccessAt = new Date().toISOString();
     state.consecutiveFailures = 0;
     delete state.lastError;
-    writeState(state);
+    // Data is already injected + compacted; a metadata-persist failure here must
+    // NOT flip a successful flush into a recorded failure.
+    try { writeState(state); } catch (we) { log('ERROR', `state persist after successful flush failed (data already injected): ${we.message}`); }
     log('INFO', `flushed ${injected} item(s) (${entries.length} entrie(s)) to ${threadId} in ${batches.length} batch(es)`);
     cleanPayloads();
   } catch (e) {
-    const drift = e.rpcCode === -32601 || e.rpcCode === -32602 || /method not found|invalid params|unknown field/i.test(e.message || '');
+    const drift = e.drift === true || e.rpcCode === -32601 || e.rpcCode === -32602 || /method not found|invalid params|unknown field/i.test(e.message || '');
     state.consecutiveFailures = (state.consecutiveFailures || 0) + 1;
     state.lastErrorAt = new Date().toISOString();
     state.lastError = `${drift ? 'PROTOCOL_DRIFT' : 'TRANSIENT'}: ${singleLine(e.message, 200)}`;
@@ -735,7 +754,7 @@ async function cmdFlush() {
     log('ERROR', `flush failed (${state.lastError}); ${entries.length} entrie(s) stay spooled; server: ${client.stderrTail()}`);
     const n = state.consecutiveFailures;
     if (n === 3 || (n > 3 && n % NOTIFY_EVERY === 0)) {
-      notifyUser(`EigenFlux Codex 日志已连续 ${n} 次写入失败（${drift ? '协议漂移，需人工适配' : '临时错误'}）：${singleLine(e.message, 80)}`);
+      notifyUser(`EigenFlux Codex 日志已连续 ${n} 次写入失败（${drift ? '协议漂移，需人工适配' : '临时错误'}）：${redact(singleLine(e.message, 80))}`);
     }
     exitCode = drift ? 4 : 2;
   } finally {
@@ -752,7 +771,11 @@ function cmdStatus() {
   let lock = null;
   try { lock = JSON.parse(readFileSync(LOCK, 'utf8')); } catch { /* no lock */ }
   const sinceSuccess = state.lastSuccessAt ? Date.now() - Date.parse(state.lastSuccessAt) : null;
-  const stalled = spool.length > 0 && (sinceSuccess === null || sinceSuccess > STALE_SUCCESS_MS);
+  // Never-succeeded is only "stalled" once it has actually failed a few times —
+  // otherwise a brand-new install with one queued entry reads as stalled.
+  const stalled = spool.length > 0 && (
+    sinceSuccess === null ? (state.consecutiveFailures || 0) >= 3 : sinceSuccess > STALE_SUCCESS_MS
+  );
   const out = {
     enabled: ENABLED,
     sinkHome: SINK_HOME,
@@ -801,7 +824,14 @@ async function selfcheckOn(client) {
     await client.request('thread/delete', { threadId }).catch(() => { /* leave temp thread */ });
   }
   if (!path) { log('WARN', 'selfcheck: no rollout path (UNSTABLE); proceeding unverified'); return true; }
-  if (!seen) throw new Error('selfcheck: injected marker not found in rollout via thread/read path');
+  if (!seen) {
+    // Marker didn't persist = this codex version's inject doesn't behave as
+    // expected. That's a protocol problem (stop injecting, alert), not a
+    // transient one — flag it so cmdFlush doesn't retry-loop forever.
+    const err = new Error('selfcheck: injected marker not found in rollout via thread/read path');
+    err.drift = true;
+    throw err;
+  }
   return true;
 }
 
