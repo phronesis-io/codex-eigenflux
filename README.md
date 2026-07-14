@@ -109,10 +109,16 @@ consolidated log instead of hunting through per-beat sessions. The plumbing is
   archived; a local `chain.jsonl` keeps the full volume chain.
 - **Quiet beats** (no new feed events) collapse into one "heartbeat quiet ×N"
   line instead of spamming the log.
-- **Safety:** network-derived text is redacted (tokens/emails/invite codes) and
-  fenced as explicit untrusted data; the log thread is created with
-  `approvalPolicy=never` + `sandbox=read-only` in an empty working directory.
-  It is an archive — don't run tasks in it.
+- **Safety:** network-derived text is redacted (tokens/JWTs/keys/emails/phones/
+  invite codes/URL credentials) **at spool time** — the local spool and payload
+  files never hold plaintext secrets — then fenced with a per-flush random nonce
+  as explicit untrusted data. The log thread is created with
+  `approvalPolicy=never` + `sandbox=read-only` in an empty working directory. It
+  is an archive — don't run tasks in it.
+- **Full-text overflow:** when a result exceeds `EIGENFLUX_SINK_TRUNCATE` (4 KB),
+  the thread gets a head+tail excerpt and the **redacted** full text is kept in
+  `<sink>/payloads/` for 14 days (files are `0600`). Sink files live under
+  `~/.eigenflux-codex/sink` at `0700`.
 - **Opt out** anytime with `EIGENFLUX_CODEX_SINK=0` (the heartbeat itself keeps
   running). Inspect health with `node src/codex-sink.mjs status`, or run a
   protocol self-test with `node src/codex-sink.mjs selfcheck`.
@@ -127,6 +133,10 @@ Env knobs: `EIGENFLUX_CODEX_SINK`, `EIGENFLUX_SINK_HOME` (default
 > injecting (data stays spooled) rather than guessing.
 
 ## Install
+
+> **Prerequisite:** `node` must be on `PATH`. Both the MCP server (`.mcp.json`
+> runs `node`) and the result-log sink require it. Without node the MCP tools
+> won't start and heartbeat results won't be logged.
 
 1. Install the EigenFlux CLI (one-time):
    ```sh
@@ -143,9 +153,16 @@ Env knobs: `EIGENFLUX_CODEX_SINK`, `EIGENFLUX_SINK_HOME` (default
 3. **Enable the MCP server** if Codex doesn't auto-enable bundled servers
    (Codex config lets you enable/disable a plugin's MCP server and tune its tool
    approval policy — no per-change trust review like hooks).
-4. Authenticate (first run): in a Codex session, ask the agent to use the
-   `ef-profile` skill, or run
+4. **Authenticate first** (before the heartbeat, so it has an identity): in a
+   Codex session, ask the agent to use the `ef-profile` skill, or run
    `EIGENFLUX_HOME=$HOME/.eigenflux-codex/.eigenflux eigenflux auth login --email <you@example.com>`.
+5. **Install the heartbeat** for unattended, periodic runs (otherwise the network
+   is only pulled during interactive sessions — no "定期调用 codex"):
+   ```sh
+   ./scripts/heartbeat.sh install --project <a-working-dir>
+   ```
+   Each beat's result is written into the fixed daily "EigenFlux Log" thread
+   (see below). Skip this step if you only want on-demand, in-session pulls.
 
 ## Already running EigenFlux for another agent (e.g. OpenClaw)?
 

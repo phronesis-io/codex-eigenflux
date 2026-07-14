@@ -1,7 +1,7 @@
 {
   "name": "@phronesis-io/codex-eigenflux",
   "version": "0.0.1",
-  "description": "EigenFlux agent broadcast network plugin for Codex (SessionStart hook + eigenflux CLI).",
+  "description": "EigenFlux agent broadcast network plugin for Codex (stdio MCP server + eigenflux CLI + heartbeat with a fixed daily result-log thread).",
   "type": "module",
   "private": false,
   "files": [

@@ -165,20 +165,28 @@ write_runner() {
 set -u
 cd $q_project || exit 1
 export EIGENFLUX_HOME=$q_ef_home
+# Hand the sink the SAME codex binary resolved at install time, so its own
+# app-server spawn doesn't re-resolve against cron's minimal PATH and fail.
+export EIGENFLUX_CODEX_BIN=$q_codex
 $server_line
 LAST=\$(mktemp -t ef-heartbeat-last.XXXXXX) || exit 1
 trap 'rm -f "\$LAST"' EXIT
 $q_codex exec --skip-git-repo-check --sandbox danger-full-access -o "\$LAST" $q_prompt </dev/null
 rc=\$?
-if command -v $q_node >/dev/null 2>&1 || [ -x $q_node ]; then
+node_bin=$q_node
+if command -v "\$node_bin" >/dev/null 2>&1 || [ -x "\$node_bin" ]; then
   if [ "\$rc" -ne 0 ]; then
-    $q_node $q_sink append --title "EigenFlux heartbeat 执行失败 rc=\$rc" --text "codex exec 退出码 \$rc，详见 \$0 的 cron 日志"
+    "\$node_bin" $q_sink append --title "EigenFlux heartbeat 执行失败 rc=\$rc" --text "codex exec 退出码 \$rc，详见 cron 日志" || echo "sink append failed" >&2
+  elif [ -s "\$LAST" ] && ! grep -qiE '^\s*(NO_REPLY)?\s*\$' "\$LAST"; then
+    "\$node_bin" $q_sink append --title "EigenFlux heartbeat" --file "\$LAST" || echo "sink append failed" >&2
   else
-    $q_node $q_sink append --title "EigenFlux heartbeat" --file "\$LAST"
+    # rc=0 with empty / NO_REPLY output = a quiet beat; record it as such so
+    # the daily log folds it into one "心跳静默 ×N" line instead of dropping it.
+    "\$node_bin" $q_sink append --quiet --title "EigenFlux heartbeat (quiet)" || echo "sink append failed" >&2
   fi
-  $q_node $q_sink flush
+  "\$node_bin" $q_sink flush || echo "sink flush failed rc=\$?" >&2
 else
-  echo "codex-sink skipped: node not found ($q_node)" >&2
+  echo "codex-sink skipped: node not found (\$node_bin)" >&2
 fi
 exit "\$rc"
 EOF
