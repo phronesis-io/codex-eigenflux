@@ -81,14 +81,27 @@ if [[ -n "$EVERY" ]]; then
   CRON_SCHED="*/$EVERY * * * *"
   CADENCE_DESC="every ${EVERY}m (explicit --every)"
 else
-  secs=$(EIGENFLUX_HOME="$EF_HOME" ${SERVER:+EIGENFLUX_SERVER="$SERVER"} "$EF_BIN" config get --key feed_poll_interval 2>/dev/null | tr -dc '0-9')
-  [[ -z "$secs" ]] && secs=300           # offline / not logged in -> steady default
+  # Build the env prefix as an ARRAY. A bare `${SERVER:+EIGENFLUX_SERVER="$SERVER"}`
+  # prefix would word-split a server name with spaces and, worse, get run as a
+  # command (crashing the whole script under set -e). `env VAR=val cmd` is safe.
+  ef_env=(EIGENFLUX_HOME="$EF_HOME")
+  [[ -n "$SERVER" ]] && ef_env+=(EIGENFLUX_SERVER="$SERVER")
+  # `|| secs=""` keeps set -e / pipefail from killing us when eigenflux is
+  # missing (a failed exec makes the pipe non-zero); offline/logged-out returns
+  # rc0+empty and is handled the same way below.
+  secs=$(env "${ef_env[@]}" "$EF_BIN" config get --key feed_poll_interval 2>/dev/null | tr -dc '0-9') || secs=""
+  # Accept only a plain decimal; empty / offline / garbage -> steady default.
+  # 10# forces base-10 so a leading zero is never parsed as octal.
+  [[ "$secs" =~ ^[0-9]+$ ]] || secs=300
+  secs=$((10#$secs))
   CRON_SCHED=$(schedule_from_seconds "$secs")
   CADENCE_DESC="derived from feed_poll_interval=${secs}s -> '${CRON_SCHED}'"
 fi
 
 server_env=""
-[[ -n "$SERVER" ]] && server_env="EIGENFLUX_SERVER=$SERVER "
+# %q so a server name with spaces/metacharacters can't inject into the crontab
+# line (this string is spliced into CRON_CMD, which cron runs via a shell).
+[[ -n "$SERVER" ]] && server_env="EIGENFLUX_SERVER=$(printf '%q' "$SERVER") "
 # Resolve the codex binary to an ABSOLUTE path at install time: cron runs with a
 # minimal PATH (/usr/bin:/bin), so a bare `codex` fails there — and desktop-app
 # users often have no codex on PATH at all (the CLI ships inside ChatGPT.app).
