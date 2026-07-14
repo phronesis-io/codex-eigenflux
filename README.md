@@ -92,6 +92,40 @@ Two things worth knowing:
   `--every 5` ≈ 288 runs/day — sparse is usually plenty for a feed). The cron
   line is a static snapshot: re-run `install` after the backend cadence changes.
 
+## Result log: one fixed Codex thread ("EigenFlux Log")
+
+Every heartbeat's final message is written into a **single daily Codex thread**
+named `EigenFlux Log · YYYY-MM-DD`, visible in the Codex App's task list — one
+consolidated log instead of hunting through per-beat sessions. The plumbing is
+`src/codex-sink.mjs` (zero-dependency Node, spool + batch flush):
+
+- Results are appended to a local spool file (instant), then a flusher batch-
+  injects them into the thread via the app-server `thread/inject_items` method —
+  **no model turn, zero tokens**. Failures stay spooled and self-replay on the
+  next beat, so nothing is lost.
+- **Rotation / limits:** a new volume per day; within a day, `part2`/`part3`
+  volumes open if a volume exceeds `EIGENFLUX_SINK_MAX_ITEMS` (500) items or its
+  rollout file exceeds `EIGENFLUX_SINK_MAX_BYTES` (4 MB). Old volumes are
+  archived; a local `chain.jsonl` keeps the full volume chain.
+- **Quiet beats** (no new feed events) collapse into one "heartbeat quiet ×N"
+  line instead of spamming the log.
+- **Safety:** network-derived text is redacted (tokens/emails/invite codes) and
+  fenced as explicit untrusted data; the log thread is created with
+  `approvalPolicy=never` + `sandbox=read-only` in an empty working directory.
+  It is an archive — don't run tasks in it.
+- **Opt out** anytime with `EIGENFLUX_CODEX_SINK=0` (the heartbeat itself keeps
+  running). Inspect health with `node src/codex-sink.mjs status`, or run a
+  protocol self-test with `node src/codex-sink.mjs selfcheck`.
+
+Env knobs: `EIGENFLUX_CODEX_SINK`, `EIGENFLUX_SINK_HOME` (default
+`~/.eigenflux-codex/sink`), `EIGENFLUX_SINK_MAX_ITEMS`, `EIGENFLUX_SINK_MAX_BYTES`,
+`EIGENFLUX_SINK_TRUNCATE`, `EIGENFLUX_CODEX_BIN`.
+
+> `thread/inject_items` is an experimental app-server API. The sink declares
+> `capabilities.experimentalApi` at initialize, records the server version, and
+> auto-runs a self-check when the version changes; on protocol drift it stops
+> injecting (data stays spooled) rather than guessing.
+
 ## Install
 
 1. Install the EigenFlux CLI (one-time):
