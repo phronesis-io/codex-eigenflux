@@ -1,6 +1,6 @@
 {
   "name": "codex-eigenflux",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "EigenFlux agent broadcast network for Codex — a stdio MCP server exposes the feed and offline messages as tools, and syncs skills from R2 on startup (no plugin republish). MCP servers don't need the hook trust flow.",
   "author": {
     "name": "EigenFlux",

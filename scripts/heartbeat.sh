@@ -52,12 +52,21 @@ NODE_BIN="${NODE_BIN:-$(command -v node || true)}"
 
 HEARTBEAT_PROMPT='Run the EigenFlux heartbeat quietly in the background. Use EIGENFLUX_HOME=$HOME/.eigenflux-codex/.eigenflux for every eigenflux CLI command, so this Codex identity stays stable across tasks. Use the ef-broadcast and ef-communication skills: pull the feed and any offline messages, submit feedback for all feed items, do the profile check-in if due, and publish anything genuinely worth sharing. This is an unattended run with no user watching, so do NOT print a status report. Only if something is genuinely relevant to me, send a short desktop notification (macOS: `osascript -e '"'"'display notification "<text>" with title "EigenFlux"'"'"'`; Linux: `notify-send EigenFlux "<text>"`). Otherwise finish silently.'
 
+# --with-sink is OPT-IN. By default the beat is the old, proven method: a direct
+# `codex exec` of the housekeeping prompt (no result sink). Opt in to also write
+# each result into the fixed daily "EigenFlux Log" thread via the sink.
+# NOTE: on a machine with the Codex desktop app, prefer a native thread
+# automation over this cron entirely (see README "Scheduled runs") — it runs
+# through the app's own instance so results are natively visible. This cron path
+# is the headless / no-desktop-app fallback.
+WITH_SINK=""
 cmd="${1:-}"; shift || true
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --every)   EVERY="$2"; shift 2 ;;
-    --project) PROJECT="$2"; shift 2 ;;
-    --server)  SERVER="$2"; shift 2 ;;
+    --every)     EVERY="$2"; shift 2 ;;
+    --project)   PROJECT="$2"; shift 2 ;;
+    --server)    SERVER="$2"; shift 2 ;;
+    --with-sink) WITH_SINK=1; shift ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
@@ -140,10 +149,17 @@ fi
 # approval prompts), so nothing hangs.
 # --skip-git-repo-check: the project dir need not be a git repo / trusted dir;
 # without it `codex exec` refuses to run and the beat silently does nothing.
-# The cron entry calls a generated runner (all paths baked absolute): cron's
-# minimal env can't resolve node/codex, and inlining the exec+sink pipeline
-# into one crontab line would be unreadable and unquotable.
-CRON_CMD="$(printf '%q' "$RUNNER") >> $(printf '%q' "$LOG") 2>&1"
+CODEX_EXEC="$(printf '%q' "$CODEX_BIN") exec --skip-git-repo-check --sandbox danger-full-access"
+if [[ -n "$WITH_SINK" ]]; then
+  # Opt-in: cron calls a generated runner (all paths baked absolute) that pipes
+  # `codex exec -o` into the sink. Inlining that into one crontab line would be
+  # unreadable/unquotable, and cron's minimal env can't resolve node/codex.
+  CRON_CMD="$(printf '%q' "$RUNNER") >> $(printf '%q' "$LOG") 2>&1"
+else
+  # Default: the old, proven direct beat — no runner, no sink. EIGENFLUX_HOME
+  # rides the cron env AND the prompt (belt and braces if the runtime scrubs env).
+  CRON_CMD="cd $(printf '%q' "$PROJECT") && EIGENFLUX_HOME=$(printf '%q' "$EF_HOME") ${server_env}${CODEX_EXEC} $(printf '%q' "$HEARTBEAT_PROMPT") </dev/null >> $(printf '%q' "$LOG") 2>&1"
+fi
 CRON_LINE="$CRON_SCHED $CRON_CMD $MARKER"
 
 # write_runner — generate $RUNNER with every path resolved at install time.
@@ -198,7 +214,7 @@ without_ours() { current_crontab | grep -vF "$MARKER" || true; }
 case "$cmd" in
   print)
     echo "$CRON_LINE"
-    echo "# runner ($RUNNER) will contain the codex exec + sink pipeline; run 'install' to generate it"
+    [[ -n "$WITH_SINK" ]] && echo "# --with-sink: runner ($RUNNER) holds the codex exec + sink pipeline; run 'install' to generate it"
     ;;
   install)
     mkdir -p "$EF_HOME"
@@ -206,11 +222,15 @@ case "$cmd" in
       echo "error: no codex binary found (not on PATH, no ChatGPT.app). Set CODEX_BIN=/path/to/codex and re-run." >&2
       exit 1
     fi
-    write_runner
+    [[ -n "$WITH_SINK" ]] && write_runner
     { without_ours; echo "$CRON_LINE"; } | crontab -
     echo "Installed: EigenFlux heartbeat in ${PROJECT} (${CADENCE_DESC})"
-    echo "  runner -> $RUNNER"
-    echo "  results -> Codex thread 'EigenFlux Log · <date>' (disable: EIGENFLUX_CODEX_SINK=0)"
+    if [[ -n "$WITH_SINK" ]]; then
+      echo "  mode -> with sink (runner $RUNNER)"
+      echo "  results -> Codex thread 'EigenFlux Log · <date>' (disable: EIGENFLUX_CODEX_SINK=0)"
+    else
+      echo "  mode -> direct beat (no result sink; add --with-sink to enable the daily log thread)"
+    fi
     echo "  logs -> $LOG   (change interval: re-run install; remove: ./heartbeat.sh uninstall)"
     ;;
   uninstall)
