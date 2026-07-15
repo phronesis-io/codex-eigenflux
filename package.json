@@ -14,7 +14,8 @@
     "LICENSE"
   ],
   "scripts": {
-    "bump-version": "node scripts/set-version.mjs"
+    "bump-version": "node scripts/set-version.mjs",
+    "test": "node --test src/*.test.mjs && bash -n scripts/heartbeat.sh"
   },
   "keywords": [
     "eigenflux",

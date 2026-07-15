@@ -2,6 +2,16 @@
 /**
  * codex-sink.mjs — write EigenFlux call results into ONE fixed Codex thread.
  *
+ * STATUS: experimental, opt-in (heartbeat.sh --with-sink). NOT on the default
+ * path — the recommended scheduler is a native Codex thread automation (README
+ * "Scheduled runs"), which makes results a browsable turn with no sink needed.
+ * The sink only produces a machine-readable rollout log (empty preview / turns:[]),
+ * and external writes don't live-refresh a running app.
+ * TODO(promote-to-default): flip the heartbeat default back to sink-on ONLY when
+ * Codex gains browsable-task + live-refresh for externally-written threads
+ * (thread/inject_items visibility, or a shared-daemon path the app connects to).
+ * Until then this stays opt-in; don't wire it into the default heartbeat.
+ *
  * Codex's task list is the user's surface; per-call threads would spam it.
  * Instead every result lands in a daily "EigenFlux Log · YYYY-MM-DD" thread
  * via the app-server `thread/inject_items` method (appends to thread history

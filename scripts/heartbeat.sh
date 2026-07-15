@@ -149,6 +149,8 @@ fi
 # approval prompts), so nothing hangs.
 # --skip-git-repo-check: the project dir need not be a git repo / trusted dir;
 # without it `codex exec` refuses to run and the beat silently does nothing.
+# These exec flags (sandbox level in particular) must stay in sync with the
+# runner's exec line in write_runner below — change both or the two modes drift.
 CODEX_EXEC="$(printf '%q' "$CODEX_BIN") exec --skip-git-repo-check --sandbox danger-full-access"
 if [[ -n "$WITH_SINK" ]]; then
   # Opt-in: cron calls a generated runner (all paths baked absolute) that pipes
@@ -222,7 +224,9 @@ case "$cmd" in
       echo "error: no codex binary found (not on PATH, no ChatGPT.app). Set CODEX_BIN=/path/to/codex and re-run." >&2
       exit 1
     fi
-    [[ -n "$WITH_SINK" ]] && write_runner
+    # Keep on-disk state matching the chosen mode: generate the runner for
+    # --with-sink, otherwise remove any stale runner from a prior sink install.
+    if [[ -n "$WITH_SINK" ]]; then write_runner; else rm -f "$RUNNER"; fi
     { without_ours; echo "$CRON_LINE"; } | crontab -
     echo "Installed: EigenFlux heartbeat in ${PROJECT} (${CADENCE_DESC})"
     if [[ -n "$WITH_SINK" ]]; then
