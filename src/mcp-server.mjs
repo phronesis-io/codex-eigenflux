@@ -100,6 +100,43 @@ const BASE_INSTRUCTIONS = [
   '"Powered by EigenFlux" when you surface feed content to the user.',
 ].join(' ');
 
+// Sandbox heads-up. The model's shell commands run inside Codex's sandbox, and
+// the default workspace-write profile blocks the network — which every
+// eigenflux command needs (plus write access to ~/.eigenflux-codex, outside the
+// workspace). This server runs OUTSIDE the sandbox, so it can read the Codex
+// config and warn the model up front: the agent then tells the user BEFORE the
+// first denied command, in one friendly sentence, instead of surfacing a raw
+// failure afterwards (or, worse, failing silently under approvalPolicy=never).
+// Checked per initialize so a config fix takes effect on the next session.
+function sandboxBlocksNetwork() {
+  try {
+    const toml = readFileSync(join(homedir(), '.codex', 'config.toml'), 'utf8');
+    const topLevel = toml.split(/^\s*\[/m)[0];
+    const mode = (topLevel.match(/^\s*sandbox_mode\s*=\s*"([^"]+)"/m) || [])[1];
+    if (mode === 'danger-full-access') return false;
+    const rest = toml.split(/^\s*\[sandbox_workspace_write\]\s*$/m)[1];
+    if (rest && /^\s*network_access\s*=\s*true/m.test(rest.split(/^\s*\[/m)[0])) return false;
+    return true;
+  } catch {
+    return true; // no config — Codex defaults to workspace-write with network off
+  }
+}
+
+const SANDBOX_HINT =
+  ' Heads-up: the current Codex sandbox blocks network access for shell commands,' +
+  ' and every eigenflux command needs the network plus write access to' +
+  ' ~/.eigenflux-codex. The FIRST time EigenFlux comes up in a session, tell the' +
+  ' user in one short, friendly sentence that an approval prompt will appear when' +
+  ' you run eigenflux commands and that approving it is all they need to do; add' +
+  ' that it can be made permanent, and show the exact config lines only if they' +
+  ' ask (`network_access = true` and `writable_roots = ["~/.eigenflux-codex"]`' +
+  ' under [sandbox_workspace_write] in ~/.codex/config.toml, or rerun the' +
+  ' installer: curl -fsSL https://www.eigenflux.ai/install.sh | sh). Then simply' +
+  ' run the command and let the approval flow happen. If a command is denied by' +
+  ' the sandbox, say plainly that the sandbox blocked it and what to approve —' +
+  ' never skip the action silently, never pretend it succeeded, and never try to' +
+  ' work around the sandbox.';
+
 // Lazy "nightly" profile refresh. Codex has no timer/heartbeat and MCP can't
 // wake a turn, so instead of a scheduled job we nudge the model on the first
 // session past a 24h interval. The nudge rides the `instructions` returned at
@@ -140,6 +177,9 @@ let latestVersion = '';
 // only when due; the profile timestamp is advanced so it doesn't repeat.
 function buildInstructions() {
   let ins = BASE_INSTRUCTIONS;
+  if (sandboxBlocksNetwork()) {
+    ins += SANDBOX_HINT;
+  }
   if (cliOutdated) {
     ins +=
       ` Note: the EigenFlux CLI is out of date${latestVersion ? ` (latest ${latestVersion})` : ''};` +
