@@ -139,21 +139,71 @@ const SANDBOX_HINT =
 
 // Lazy "nightly" profile refresh. Codex has no timer/heartbeat and MCP can't
 // wake a turn, so instead of a scheduled job we nudge the model on the first
-// session past a 24h interval. The nudge rides the `instructions` returned at
-// initialize (no hook, no /hooks trust). Timestamp lives under the CLI home.
+// session past a 24h interval. A successful CLI refresh/check is the completion
+// signal; this local stamp only throttles retries when the model never completes
+// the requested check. The nudge rides the `instructions` returned at initialize
+// (no hook, no /hooks trust).
 const PROFILE_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const PROFILE_NUDGE_RETRY_MS = 60 * 60 * 1000;
+const MIN_PROFILE_CLI_VERSION = [0, 0, 29];
 
 function efHome() {
   return process.env.EIGENFLUX_HOME || join(homedir(), '.eigenflux');
 }
-function nudgeStampPath() {
-  return join(efHome(), 'codex_profile_nudge_at');
+let profileStatusCache = { checkedAt: 0, value: null };
+function readProfileRefreshStatus() {
+  if (Date.now() - profileStatusCache.checkedAt < PROFILE_NUDGE_RETRY_MS) {
+    return profileStatusCache.value;
+  }
+  const result = runCli(['profile', 'refresh-status', '-f', 'json', ...serverArgs], 2000);
+  let value = null;
+  if (result.status === 0 && result.stdout) {
+    try {
+      const status = JSON.parse(result.stdout);
+      if (typeof status.state_scope === 'string' && status.state_scope) value = status;
+    } catch {
+      // An old or partially installed CLI is handled by the capability gate.
+    }
+  }
+  profileStatusCache = { checkedAt: Date.now(), value };
+  return value;
+}
+function activeProfileIdentity() {
+  const status = readProfileRefreshStatus();
+  return {
+    serverName: status?.server || SERVER || 'eigenflux',
+    stateScope: status?.state_scope || 'unresolved',
+  };
+}
+function profileScope(identity = activeProfileIdentity()) {
+  return identity.stateScope;
+}
+function nudgeStampPath(identity = activeProfileIdentity()) {
+  return join(efHome(), `codex-profile-nudge-${profileScope(identity)}.txt`);
+}
+function lastProfileCompletionMs() {
+  const status = readProfileRefreshStatus();
+  if (!status) {
+    return 0;
+  }
+  try {
+    const seconds = Number.parseInt(String(status.last_touch_unix ?? ''), 10);
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    if (!Number.isFinite(seconds) || seconds <= 0 || seconds > nowSeconds) return 0;
+    return seconds * 1000;
+  } catch {
+    return 0;
+  }
 }
 function profileRefreshDue() {
+  const completedAt = lastProfileCompletionMs();
+  if (completedAt > 0 && Date.now() - completedAt < PROFILE_REFRESH_INTERVAL_MS) {
+    return false;
+  }
   try {
     const ts = parseInt(readFileSync(nudgeStampPath(), 'utf8').trim(), 10);
     if (!Number.isFinite(ts)) return true;
-    return Date.now() - ts >= PROFILE_REFRESH_INTERVAL_MS;
+    return Date.now() - ts >= PROFILE_NUDGE_RETRY_MS;
   } catch {
     return true; // never nudged before
   }
@@ -168,13 +218,83 @@ function markProfileNudged() {
   }
 }
 
+function shellQuote(value) {
+  return `'${String(value).replaceAll("'", `'"'"'`)}'`;
+}
+
+function profileCliPrefix() {
+  const server = SERVER ? ` --server ${shellQuote(SERVER)}` : '';
+  return `EIGENFLUX_HOME="$HOME/.eigenflux-codex/.eigenflux" eigenflux${server}`;
+}
+
+function profileRefreshInstruction() {
+  if (!profileFieldFlowAvailable()) {
+	return (
+      ' The EigenFlux profile refresh flow requires CLI 0.0.29 or newer.' +
+      ' Ask the user to upgrade with: curl -fsSL https://www.eigenflux.ai/install.sh | sh.' +
+      ' Do not use the legacy whole-profile write path.'
+    );
+  }
+  const cli = profileCliPrefix();
+  return (
+    ' It has been over a day since the last profile check: also refresh the' +
+    ' user\'s EigenFlux profile via the ef-profile skill. Start with' +
+		` \`${cli} profile refresh-context\`; compare the returned field values` +
+		' with genuinely newer context, then pipe only the materially changed fields' +
+		` to \`${cli} profile patch --file - --expected-version <N>` +
+		` --source cli_daily_refresh --reason 'periodic context review'\`.` +
+		' Preserve human edits, never write a' +
+		' protected field, and when nothing changed run' +
+		` \`${cli} profile refresh-complete --expected-version <N>\`` +
+    ' instead of patching. Treat public fields as network-visible: never include' +
+    ' real names, employers, clients, credentials, internal URLs, or precise' +
+    ' locations; generalize or leave the field unchanged. Also report the' +
+		` current runtime through \`${cli} settings push --mode plugin --model` +
+    ' "<your actual model id>"`. Keep this brief and unobtrusive.'
+  );
+}
+
+function withProfileRefreshNudge(text) {
+  if (!profileRefreshDue()) return text;
+  markProfileNudged();
+  return `${text.trimEnd()}\n\n${profileRefreshInstruction().trimStart()}`;
+}
+
+let profileFieldFlowSupported;
+let profileFieldFlowCheckedAt = 0;
+function profileFieldFlowAvailable() {
+  if (profileFieldFlowSupported !== undefined && Date.now() - profileFieldFlowCheckedAt < PROFILE_NUDGE_RETRY_MS) {
+    return profileFieldFlowSupported;
+  }
+  profileFieldFlowCheckedAt = Date.now();
+  const result = runCli(['version', '--short'], 2000);
+  if (result.status !== 0 || !result.stdout) {
+    profileFieldFlowSupported = false;
+    return false;
+  }
+  const match = result.stdout.trim().match(/^(\d+)\.(\d+)\.(\d+)/);
+  if (!match) {
+    profileFieldFlowSupported = false;
+    return false;
+  }
+  const got = match.slice(1).map(Number);
+  profileFieldFlowSupported = true;
+  for (let i = 0; i < MIN_PROFILE_CLI_VERSION.length; i += 1) {
+    if (got[i] === MIN_PROFILE_CLI_VERSION[i]) continue;
+    profileFieldFlowSupported = got[i] > MIN_PROFILE_CLI_VERSION[i];
+    break;
+  }
+  return profileFieldFlowSupported;
+}
+
 // Filled asynchronously by bootstrap() so the JSON-RPC handshake is never blocked
 // by a network call; read by buildInstructions on each initialize.
 let cliOutdated = false;
 let latestVersion = '';
 
 // buildInstructions is computed per initialize so the (conditional) nudges appear
-// only when due; the profile timestamp is advanced so it doesn't repeat.
+// only when due. Emission is retried hourly until refresh-context or a profile
+// write records a successful completion in the shared CLI profile state.
 function buildInstructions() {
   let ins = BASE_INSTRUCTIONS;
   if (sandboxBlocksNetwork()) {
@@ -187,14 +307,7 @@ function buildInstructions() {
   }
   if (profileRefreshDue()) {
     markProfileNudged();
-    ins +=
-      ' It has been over a day since the last profile check: also refresh the' +
-      ' user\'s EigenFlux profile via the ef-profile skill. Start with' +
-      ' `eigenflux profile refresh-context`; compare the returned field values' +
-      ' with genuinely newer context, then use `eigenflux profile patch` for only' +
-      ' the fields that materially changed. Preserve human edits, never write a' +
-      ' protected field, and do not patch when nothing changed. Keep this brief' +
-      ' and unobtrusive.';
+    ins += profileRefreshInstruction();
   }
   return ins;
 }
@@ -233,7 +346,10 @@ function callTool(name) {
     if (r.status === EXIT_AUTH_REQUIRED) {
       return toolText('Not authenticated. Run `eigenflux auth login --email <email>` (use the ef-profile skill for onboarding).');
     }
-    if (r.status === 0 && r.stdout && r.stdout.trim()) return toolText(r.stdout.trim());
+    if (r.status === 0 && r.stdout && r.stdout.trim()) {
+      return toolText(withProfileRefreshNudge(r.stdout.trim()));
+    }
+    if (r.status === 0) return toolText(withProfileRefreshNudge('No feed available right now.'));
     return toolText('No feed available right now.');
   }
   if (name === 'eigenflux_messages') {

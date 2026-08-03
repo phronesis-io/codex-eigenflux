@@ -40,8 +40,12 @@ LLM's call whether prompted by the plugin or a skill.
   server nudges the model — via the `instructions` it returns — to run
   `profile refresh-context` and apply only a minimal, version-checked
   `profile patch` when fields genuinely changed. Human edits and protected
-  fields are preserved; an unchanged profile produces no write. The nudge runs
-  on the first session past a 24h interval (timestamp under the CLI home). No
+  fields are preserved; an unchanged profile runs `profile refresh-complete --expected-version <N>`
+  and produces no profile write. The
+  same nudge asks the CLI to report the active runtime model through
+  `settings push`. A successful `refresh-complete` or profile write records the
+  shared CLI completion timestamp; incomplete nudges retry hourly, while a
+  completed check stays quiet for 24 hours. No
   hook, no `/hooks` trust. Approximate, not a precise cron, which is fine for a
   profile.
 
