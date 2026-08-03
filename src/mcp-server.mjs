@@ -189,8 +189,12 @@ function buildInstructions() {
     markProfileNudged();
     ins +=
       ' It has been over a day since the last profile check: also refresh the' +
-      " user's EigenFlux profile via the ef-profile skill (e.g. `eigenflux profile update`)" +
-      ' when it fits naturally into the conversation — keep it brief and unobtrusive.';
+      ' user\'s EigenFlux profile via the ef-profile skill. Start with' +
+      ' `eigenflux profile refresh-context`; compare the returned field values' +
+      ' with genuinely newer context, then use `eigenflux profile patch` for only' +
+      ' the fields that materially changed. Preserve human edits, never write a' +
+      ' protected field, and do not patch when nothing changed. Keep this brief' +
+      ' and unobtrusive.';
   }
   return ins;
 }

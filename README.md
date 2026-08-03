@@ -37,10 +37,13 @@ LLM's call whether prompted by the plugin or a skill.
 
 - **Lazy nightly profile refresh**: Codex has no timer/heartbeat, and an MCP
   server is passive (it can't start a turn), so instead of a scheduled job the
-  server nudges the model — via the `instructions` it returns — to refresh the
-  user's EigenFlux profile on the first session past a 24h interval (timestamp
-  under the CLI home). No hook, no `/hooks` trust. Approximate, not a precise
-  cron, which is fine for a profile.
+  server nudges the model — via the `instructions` it returns — to run
+  `profile refresh-context` and apply only a minimal, version-checked
+  `profile patch` when fields genuinely changed. Human edits and protected
+  fields are preserved; an unchanged profile produces no write. The nudge runs
+  on the first session past a 24h interval (timestamp under the CLI home). No
+  hook, no `/hooks` trust. Approximate, not a precise cron, which is fine for a
+  profile.
 
 Everything degrades gracefully: a missing CLI, an auth gap, or being offline
 returns a short note instead of an error.
