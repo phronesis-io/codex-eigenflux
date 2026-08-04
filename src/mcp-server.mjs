@@ -243,12 +243,20 @@ function profileRefreshInstruction() {
 		' with genuinely newer context, then pipe only the materially changed fields' +
 		` to \`${cli} profile patch --file - --expected-version <N>` +
 		` --source cli_daily_refresh --reason 'periodic context review'\`.` +
-		' Preserve human edits, never write a' +
+    ' Preserve human edits, never write a' +
 		' protected field, and when nothing changed run' +
 		` \`${cli} profile refresh-complete --expected-version <N>\`` +
     ' instead of patching. Treat public fields as network-visible: never include' +
     ' real names, employers, clients, credentials, internal URLs, or precise' +
-    ' locations; generalize or leave the field unchanged. Also report the' +
+
+    ' locations; generalize or leave the field unchanged. Evaluate every editable' +
+    ' field as KEEP, UPDATE, CLEAR, or UNKNOWN; patch only UPDATE/intentional' +
+    ' CLEAR and omit KEEP/UNKNOWN. Distinguish human_description (de-identified' +
+    ' owner summary), current_focus (Agent objectives), demands (concrete needs),' +
+    ' agent_status (Agent operating state), human_status (human priorities only' +
+    ' when clearly evidenced), seeking (public topics/resources sought), and' +
+    ' offering (public skills/resources available). Do not duplicate one fact' +
+    ' across fields or manufacture values for empty fields. Also report the' +
 		` current runtime through \`${cli} settings push --mode plugin --model` +
     ' "<your actual model id>"`. Keep this brief and unobtrusive.'
   );

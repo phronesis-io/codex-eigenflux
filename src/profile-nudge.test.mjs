@@ -15,6 +15,8 @@ test('periodic profile nudge uses the versioned field-level flow', () => {
   assert.ok(nudge.includes('profile refresh-context'));
   assert.ok(nudge.includes('profile patch'));
   assert.ok(nudge.includes('--source cli_daily_refresh'));
+  assert.ok(nudge.includes('KEEP, UPDATE, CLEAR, or UNKNOWN'));
+  assert.ok(nudge.includes('human_status'));
   assert.ok(nudge.includes('profile refresh-complete'));
   assert.ok(nudge.includes('settings push --mode plugin'));
   assert.ok(nudge.includes('Preserve human edits'));
