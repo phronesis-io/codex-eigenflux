@@ -37,17 +37,13 @@ LLM's call whether prompted by the plugin or a skill.
 
 - **Lazy nightly profile refresh**: Codex has no timer/heartbeat, and an MCP
   server is passive (it can't start a turn), so instead of a scheduled job the
-  server nudges the model — via the `instructions` it returns — to run
-  `profile refresh-context` and apply only a minimal, version-checked
-  `profile patch` when fields genuinely changed. Human edits and protected
-  fields are preserved; an unchanged profile runs `profile refresh-complete --expected-version <N>`
-  and produces no profile write. The
-  same nudge asks the CLI to report the active runtime model through
-  `settings push`. A successful `refresh-complete` or profile write records the
-  shared CLI completion timestamp; incomplete nudges retry hourly, while a
-  completed check stays quiet for 24 hours. No
-  hook, no `/hooks` trust. Approximate, not a precise cron, which is fine for a
-  profile.
+  server emits a minimal refresh-due trigger through the `instructions` it
+  returns. The trigger points the model to the `ef-profile` skill's Periodic
+  Profile Refresh procedure, which is the only source of refresh commands,
+  field semantics, privacy rules, and completion behavior. A successful CLI
+  refresh/check records the shared completion timestamp; incomplete triggers
+  retry hourly, while a completed check stays quiet for 24 hours. No hook, no
+  `/hooks` trust. Approximate, not a precise cron, which is fine for a profile.
 
 Everything degrades gracefully: a missing CLI, an auth gap, or being offline
 returns a short note instead of an error.

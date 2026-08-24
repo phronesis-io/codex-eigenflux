@@ -145,7 +145,6 @@ const SANDBOX_HINT =
 // (no hook, no /hooks trust).
 const PROFILE_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const PROFILE_NUDGE_RETRY_MS = 60 * 60 * 1000;
-const MIN_PROFILE_CLI_VERSION = [0, 0, 29];
 
 function efHome() {
   return process.env.EIGENFLUX_HOME || join(homedir(), '.eigenflux');
@@ -218,47 +217,10 @@ function markProfileNudged() {
   }
 }
 
-function shellQuote(value) {
-  return `'${String(value).replaceAll("'", `'"'"'`)}'`;
-}
-
-function profileCliPrefix() {
-  const server = SERVER ? ` --server ${shellQuote(SERVER)}` : '';
-  return `EIGENFLUX_HOME="$HOME/.eigenflux-codex/.eigenflux" eigenflux${server}`;
-}
-
 function profileRefreshInstruction() {
-  if (!profileFieldFlowAvailable()) {
-	return (
-      ' The EigenFlux profile refresh flow requires CLI 0.0.29 or newer.' +
-      ' Ask the user to upgrade with: curl -fsSL https://www.eigenflux.ai/install.sh | sh.' +
-      ' Do not use the legacy whole-profile write path.'
-    );
-  }
-  const cli = profileCliPrefix();
   return (
-    ' It has been over a day since the last profile check: also refresh the' +
-    ' user\'s EigenFlux profile via the ef-profile skill. Start with' +
-		` \`${cli} profile refresh-context\`; compare the returned field values` +
-		' with genuinely newer context, then pipe only the materially changed fields' +
-		` to \`${cli} profile patch --file - --expected-version <N>` +
-		` --source cli_daily_refresh --reason 'periodic context review'\`.` +
-    ' Preserve human edits, never write a' +
-		' protected field, and when nothing changed run' +
-		` \`${cli} profile refresh-complete --expected-version <N>\`` +
-    ' instead of patching. Treat public fields as network-visible: never include' +
-    ' real names, employers, clients, credentials, internal URLs, or precise' +
-
-    ' locations; generalize or leave the field unchanged. Evaluate every editable' +
-    ' field as KEEP, UPDATE, CLEAR, or UNKNOWN; patch only UPDATE/intentional' +
-    ' CLEAR and omit KEEP/UNKNOWN. Distinguish human_description (de-identified' +
-    ' owner summary), current_focus (Agent objectives), demands (concrete needs),' +
-    ' agent_status (Agent operating state), human_status (human priorities only' +
-    ' when clearly evidenced), seeking (public topics/resources sought), and' +
-    ' offering (public skills/resources available). Do not duplicate one fact' +
-    ' across fields or manufacture values for empty fields. Also report the' +
-		` current runtime through \`${cli} settings push --mode plugin --model` +
-    ' "<your actual model id>"`. Keep this brief and unobtrusive.'
+    ' EigenFlux periodic profile refresh is due. Use the ef-profile skill and' +
+    ' follow its "Periodic Profile Refresh" procedure as the only source of truth.'
   );
 }
 
@@ -266,33 +228,6 @@ function withProfileRefreshNudge(text) {
   if (!profileRefreshDue()) return text;
   markProfileNudged();
   return `${text.trimEnd()}\n\n${profileRefreshInstruction().trimStart()}`;
-}
-
-let profileFieldFlowSupported;
-let profileFieldFlowCheckedAt = 0;
-function profileFieldFlowAvailable() {
-  if (profileFieldFlowSupported !== undefined && Date.now() - profileFieldFlowCheckedAt < PROFILE_NUDGE_RETRY_MS) {
-    return profileFieldFlowSupported;
-  }
-  profileFieldFlowCheckedAt = Date.now();
-  const result = runCli(['version', '--short'], 2000);
-  if (result.status !== 0 || !result.stdout) {
-    profileFieldFlowSupported = false;
-    return false;
-  }
-  const match = result.stdout.trim().match(/^(\d+)\.(\d+)\.(\d+)/);
-  if (!match) {
-    profileFieldFlowSupported = false;
-    return false;
-  }
-  const got = match.slice(1).map(Number);
-  profileFieldFlowSupported = true;
-  for (let i = 0; i < MIN_PROFILE_CLI_VERSION.length; i += 1) {
-    if (got[i] === MIN_PROFILE_CLI_VERSION[i]) continue;
-    profileFieldFlowSupported = got[i] > MIN_PROFILE_CLI_VERSION[i];
-    break;
-  }
-  return profileFieldFlowSupported;
 }
 
 // Filled asynchronously by bootstrap() so the JSON-RPC handshake is never blocked
