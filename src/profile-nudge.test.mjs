@@ -53,7 +53,7 @@ test('feed tool emits only the canonical skill refresh trigger', () => {
 case "$*" in
   "profile refresh-status -f json -s staging")
     printf '%s\\n' '{"server":"staging","agent_id":"42","state_scope":"scope42","last_touch_unix":0}' ;;
-  "version --short") printf '%s\\n' '0.0.29' ;;
+  "version --short") printf '%s\\n' '0.0.35' ;;
   "feed poll -f agent -s staging") printf '%s\\n' 'FEED_PAYLOAD' ;;
   "doctor -f json") printf '%s\\n' '{"outdated":false}' ;;
   *) exit 0 ;;

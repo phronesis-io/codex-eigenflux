@@ -33,6 +33,7 @@ const log = (...a) => console.error('[eigenflux:mcp]', ...a);
 const BIN = process.env.EIGENFLUX_BIN || 'eigenflux';
 const SERVER = process.env.EIGENFLUX_SERVER || '';
 const serverArgs = SERVER ? ['-s', SERVER] : [];
+const MINIMUM_CLI_VERSION = '0.0.35';
 
 // Version — read from .codex-plugin/plugin.json (the single source of truth that
 // `npm run bump-version` rewrites) rather than hardcoding here. A hardcoded value
@@ -240,6 +241,14 @@ let latestVersion = '';
 // write records a successful completion in the shared CLI profile state.
 function buildInstructions() {
   let ins = BASE_INSTRUCTIONS;
+  const cliCompatibility = readCliCompatibility();
+  if (!cliCompatibility.compatible) {
+    ins +=
+      ` EigenFlux network workflows are blocked until CLI ${MINIMUM_CLI_VERSION} or newer is installed` +
+      ` (detected ${cliCompatibility.version ?? 'unknown'}). Ask the user to upgrade with:` +
+      ' curl -fsSL https://www.eigenflux.ai/install.sh | sh. Do not run Feed, Context,' +
+      ' or Stream on the older CLI.';
+  }
   if (sandboxBlocksNetwork()) {
     ins += SANDBOX_HINT;
   }
@@ -274,6 +283,30 @@ function runCli(args, timeoutMs = 25000) {
   return spawnSync(BIN, args, { encoding: 'utf8', timeout: timeoutMs, maxBuffer: 10 * 1024 * 1024 });
 }
 
+function compareCliVersions(left, right) {
+  const parse = (value) => {
+    const match = String(value || '').trim().match(/^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/);
+    return match ? match.slice(1).map(Number) : null;
+  };
+  const a = parse(left);
+  const b = parse(right);
+  if (!a || !b) return null;
+  for (let index = 0; index < 3; index += 1) {
+    if (a[index] !== b[index]) return a[index] < b[index] ? -1 : 1;
+  }
+  return 0;
+}
+
+function readCliCompatibility() {
+  const result = runCli(['version', '--short'], 2000);
+  const version = result.status === 0 ? result.stdout?.trim() || null : null;
+  const comparison = compareCliVersions(version, MINIMUM_CLI_VERSION);
+  return {
+    version,
+    compatible: comparison !== null && comparison >= 0,
+  };
+}
+
 const EXIT_AUTH_REQUIRED = 4;
 
 function toolText(text) {
@@ -281,6 +314,15 @@ function toolText(text) {
 }
 
 function callTool(name) {
+  if (name === 'eigenflux_feed' || name === 'eigenflux_messages') {
+    const compatibility = readCliCompatibility();
+    if (!compatibility.compatible) {
+      return toolText(
+        `EigenFlux CLI ${MINIMUM_CLI_VERSION} or newer is required before Feed, Context, or Stream can continue` +
+        ` (detected ${compatibility.version ?? 'unknown'}). Upgrade with: curl -fsSL https://www.eigenflux.ai/install.sh | sh`
+      );
+    }
+  }
   if (name === 'eigenflux_feed') {
     const r = runCli(['feed', 'poll', '-f', 'agent', ...serverArgs]);
     if (r.error && r.error.code === 'ENOENT') {
@@ -396,6 +438,13 @@ function execAsync(args, cb) {
 }
 
 function bootstrap() {
+  const compatibility = readCliCompatibility();
+  if (!compatibility.compatible) {
+    cliOutdated = true;
+    latestVersion = MINIMUM_CLI_VERSION;
+    log(`CLI compatibility gate blocked bootstrap (installed=${compatibility.version ?? 'unknown'}, required>=${MINIMUM_CLI_VERSION})`);
+    return;
+  }
   execAsync(['skills', 'sync', '--quiet', '--if-stale', '--host', 'codex'], (err) => {
     if (err && err.code === 'ENOENT') {
       log('eigenflux CLI not installed; tools will report install instructions');
