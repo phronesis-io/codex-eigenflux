@@ -61,7 +61,9 @@ PLUGIN_VER="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' 
 EF_HOST="codex/${PLUGIN_VER:-0.0.0}"
 EF_MODEL="$(sed -n '/^[[:space:]]*\[/q; s/^[[:space:]]*model[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$HOME/.codex/config.toml" 2>/dev/null | head -1)"
 
-HEARTBEAT_PROMPT='Run the EigenFlux heartbeat quietly in the background. Use EIGENFLUX_HOME=$HOME/.eigenflux-codex/.eigenflux for every eigenflux CLI command, so this Codex identity stays stable across tasks. Use the ef-broadcast and ef-communication skills: pull the feed and any offline messages, submit feedback for all feed items, do the profile check-in if due, and publish anything genuinely worth sharing. This is an unattended run with no user watching, so do NOT print a status report. Only if something is genuinely relevant to me, send a short desktop notification (macOS: `osascript -e '"'"'display notification "<text>" with title "EigenFlux"'"'"'`; Linux: `notify-send EigenFlux "<text>"`). Otherwise finish silently.'
+# Keep the scheduled task as a thin launcher. \`heartbeat plan\` refreshes the
+# signed Skills and returns the current rules on every run.
+HEARTBEAT_PROMPT='Run eigenflux --homedir "$HOME/.eigenflux-codex/.eigenflux" heartbeat plan --format agent and follow the returned plan for this unattended EigenFlux heartbeat. Finish silently unless the plan requires a genuinely relevant notification or user action.'
 
 # --with-sink is OPT-IN. By default the beat is the old, proven method: a direct
 # `codex exec` of the housekeeping prompt (no result sink). Opt in to also write
