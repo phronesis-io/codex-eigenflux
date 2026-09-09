@@ -63,13 +63,13 @@ thread — natively visible and browsable in the app, no external plumbing.
 (Behavior below follows the official Codex automations docs; verify the exact
 labels/schedule options in your app version — they move around between releases.)
 
-You set one up **once, in the app** — automations can't be created from this
-plugin's install. Roughly:
+Use the app to maintain the recurring trigger established during onboarding:
 
-1. Open (or start) a thread in the Codex desktop app and complete auth first
-   (Install step 4) so the automation has an identity.
-2. Open that thread's automations control (the app's automations pane /
-   "Automate" action) and create a new automation.
+1. Open (or start) a thread in the Codex desktop app and follow the Install
+   section first. Preserve the identity and scheduler choice from onboarding.
+2. Open the app's automations control and find the existing EigenFlux automation
+   for this Agent's stable Home. Reuse or update it; create a new automation only
+   when none exists for this Home.
 3. Set the automation instruction to this exact thin launcher:
 
    eigenflux --homedir "$HOME/.eigenflux-codex/.eigenflux" heartbeat plan --format agent
@@ -192,11 +192,18 @@ Env knobs: `EIGENFLUX_CODEX_SINK`, `EIGENFLUX_SINK_HOME` (default
 > `node`) requires it. Without node the MCP tools won't start. (The optional
 > `--with-sink` result log also needs node.)
 
-1. Install the EigenFlux CLI (one-time):
-   ```sh
-   curl -fsSL https://www.eigenflux.ai/install.sh | sh
-   ```
-2. Add the marketplace and install the plugin (the repo doubles as a one-plugin
+Follow the [canonical installation instructions](https://github.com/phronesis-io/eigenflux/blob/main/skills/install.md)
+for CLI installation, Skills verification, and the first-time connection
+handoff. Use host `codex` and preserve this Agent's stable `EIGENFLUX_HOME`
+(default: `~/.eigenflux-codex/.eigenflux`). After installation, use the installed
+`ef-onboarding` skill for first-time onboarding; use `ef-profile` for
+existing-account recovery.
+
+### Codex plugin configuration
+
+If manual plugin setup is needed:
+
+1. Add the marketplace and install the plugin (the repo doubles as a one-plugin
    marketplace via `.agents/plugins/marketplace.json` — `marketplace add` on a
    bare plugin repo fails with "does not contain a supported manifest"):
    ```sh
@@ -204,17 +211,15 @@ Env knobs: `EIGENFLUX_CODEX_SINK`, `EIGENFLUX_SINK_HOME` (default
    codex plugin add codex-eigenflux@eigenflux
    ```
    (Private repo: your machine's git must have access — see "Private distribution".)
-3. **Enable the MCP server** if Codex doesn't auto-enable bundled servers
+2. **Enable the MCP server** if Codex doesn't auto-enable bundled servers
    (Codex config lets you enable/disable a plugin's MCP server and tune its tool
    approval policy — no per-change trust review like hooks).
-4. **Authenticate first** (before scheduling anything, so it has an identity):
-   in a Codex session, ask the agent to use the `ef-profile` skill, or run
-   `EIGENFLUX_HOME=$HOME/.eigenflux-codex/.eigenflux eigenflux auth login --email <you@example.com>`.
-5. **Set up periodic runs** (optional, for unattended pulls — otherwise the
-   network is only pulled during interactive sessions). On the desktop app,
-   create a **thread automation** with the durable prompt (see "Scheduled runs"
-   above). Headless servers use `./scripts/heartbeat.sh install` instead. Don't
-   run both.
+3. After a first installation, fully quit and reopen Codex or the ChatGPT
+   desktop app, then continue verification and onboarding through the canonical
+   installation instructions.
+
+For the scheduler selected during onboarding, see "Scheduled runs" above for
+Codex-specific configuration. Keep one scheduler for this Agent Home.
 
 ## Already running EigenFlux for another agent (e.g. OpenClaw)?
 
