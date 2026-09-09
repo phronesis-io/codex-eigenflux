@@ -80,6 +80,14 @@ process.env.EIGENFLUX_HOME ||= join(homedir(), '.eigenflux-codex', '.eigenflux')
 
 const PROTOCOL_VERSION = '2024-11-05';
 const SERVER_INFO = { name: 'eigenflux', version: PLUGIN_VERSION };
+const INSTALL_DOC_URL = 'https://github.com/phronesis-io/eigenflux/blob/main/skills/install.md';
+const INSTALL_INSTRUCTIONS =
+  `EigenFlux CLI not installed. Read and follow ${INSTALL_DOC_URL} for host codex.` +
+  ' Preserve this Agent\'s EIGENFLUX_HOME (default: $HOME/.eigenflux-codex/.eigenflux).';
+const AUTH_INSTRUCTIONS =
+  'Not authenticated in this Codex Agent Home. Use the installed ef-onboarding skill' +
+  ' for first-time onboarding, or ef-profile for existing-account recovery.' +
+  ' Preserve this Agent\'s EIGENFLUX_HOME (default: $HOME/.eigenflux-codex/.eigenflux).';
 const BASE_INSTRUCTIONS = [
   'You are connected to the EigenFlux agent broadcast network as YOUR OWN identity',
   '(this Codex agent) — EigenFlux is set up for you, not for OpenClaw or any other',
@@ -87,7 +95,8 @@ const BASE_INSTRUCTIONS = [
   'machine also runs EigenFlux for another agent (e.g. OpenClaw at',
   '~/.openclaw/.eigenflux), that login is not yours — being asked to log in here',
   'is expected. Never point EIGENFLUX_HOME at another agent\'s home or reuse its',
-  'credentials; complete your own onboarding.',
+  'credentials. Use the installed ef-onboarding skill for first-time onboarding;',
+  'use ef-profile for existing-account recovery.',
   'Your stable home is $HOME/.eigenflux-codex/.eigenflux — prefix EVERY eigenflux',
   'CLI command you run in a shell with EIGENFLUX_HOME=$HOME/.eigenflux-codex/.eigenflux',
   '(shell commands do not inherit this server\'s env). Never derive the home from',
@@ -130,8 +139,9 @@ const SANDBOX_HINT =
   ' you run eigenflux commands and that approving it is all they need to do; add' +
   ' that it can be made permanent, and show the exact config lines only if they' +
   ' ask (`network_access = true` and `writable_roots = ["~/.eigenflux-codex"]`' +
-  ' under [sandbox_workspace_write] in ~/.codex/config.toml, or rerun the' +
-  ' installer: curl -fsSL https://www.eigenflux.ai/install.sh | sh). Then simply' +
+  ' under [sandbox_workspace_write] in ~/.codex/config.toml, or follow the' +
+  ` canonical installation instructions at ${INSTALL_DOC_URL} for host codex` +
+  ' while preserving this Agent\'s EIGENFLUX_HOME). Then simply' +
   ' run the command and let the approval flow happen. If a command is denied by' +
   ' the sandbox, say plainly that the sandbox blocked it and what to approve —' +
   ' never skip the action silently, never pretend it succeeded, and never try to' +
@@ -284,10 +294,10 @@ function callTool(name) {
   if (name === 'eigenflux_feed') {
     const r = runCli(['feed', 'poll', '-f', 'agent', ...serverArgs]);
     if (r.error && r.error.code === 'ENOENT') {
-      return toolText('EigenFlux CLI not installed. Run: curl -fsSL https://www.eigenflux.ai/install.sh | sh');
+      return toolText(INSTALL_INSTRUCTIONS);
     }
     if (r.status === EXIT_AUTH_REQUIRED) {
-      return toolText('Not authenticated. Run `eigenflux auth login --email <email>` (use the ef-profile skill for onboarding).');
+      return toolText(AUTH_INSTRUCTIONS);
     }
     if (r.status === 0 && r.stdout && r.stdout.trim()) {
       return toolText(withProfileRefreshNudge(r.stdout.trim()));
@@ -298,10 +308,10 @@ function callTool(name) {
   if (name === 'eigenflux_messages') {
     const r = runCli(['stream', '--once', ...serverArgs]);
     if (r.error && r.error.code === 'ENOENT') {
-      return toolText('EigenFlux CLI not installed.');
+      return toolText(INSTALL_INSTRUCTIONS);
     }
     if (r.status === EXIT_AUTH_REQUIRED) {
-      return toolText('Not authenticated. Run `eigenflux auth login --email <email>`.');
+      return toolText(AUTH_INSTRUCTIONS);
     }
     if (r.status === 0 && r.stdout && r.stdout.trim()) return toolText(r.stdout.trim());
     return toolText('No offline messages.');
