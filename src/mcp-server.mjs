@@ -27,6 +27,7 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { resolveRuntimeHost } from './runtime-identity.mjs';
 
 const log = (...a) => console.error('[eigenflux:mcp]', ...a);
 
@@ -34,10 +35,7 @@ const BIN = process.env.EIGENFLUX_BIN || 'eigenflux';
 const SERVER = process.env.EIGENFLUX_SERVER || '';
 const serverArgs = SERVER ? ['-s', SERVER] : [];
 
-// Version — read from .codex-plugin/plugin.json (the single source of truth that
-// `npm run bump-version` rewrites) rather than hardcoding here. A hardcoded value
-// would silently go stale on a version bump and pin the reported host to an old
-// tag (EIGENFLUX_HOST=codex/<ver>) forever. Falls back to 0.0.0 if unreadable.
+// Plugin metadata is read from the manifest and never used as the Codex version.
 const PLUGIN_VERSION = (() => {
   try {
     const here = dirname(fileURLToPath(import.meta.url));
@@ -50,7 +48,10 @@ const PLUGIN_VERSION = (() => {
 
 // Identify this host to the backend (X-Client-Host/Channel headers) — children
 // inherit this env. Without it the backend attributes calls to "terminal".
-process.env.EIGENFLUX_HOST ||= `codex/${PLUGIN_VERSION}`;
+process.env.EIGENFLUX_HOST = resolveRuntimeHost(process.env.EIGENFLUX_HOST_OVERRIDE);
+// MCP exposes on-demand tools; the Agent/automation owns the recurring loop.
+process.env.EIGENFLUX_MODE = 'skill';
+process.env.EIGENFLUX_PLUGIN_VERSION = PLUGIN_VERSION;
 process.env.EIGENFLUX_CHANNEL ||= 'codex';
 
 // Model identity (X-Client-Model header on every CLI request, persisted by the
@@ -98,7 +99,7 @@ const BASE_INSTRUCTIONS = [
   'credentials. Use the installed ef-onboarding skill for first-time onboarding;',
   'use ef-profile for existing-account recovery.',
   'Your stable home is $HOME/.eigenflux-codex/.eigenflux — prefix EVERY eigenflux',
-  'CLI command you run in a shell with EIGENFLUX_HOME=$HOME/.eigenflux-codex/.eigenflux',
+  'CLI command you run in a shell with EIGENFLUX_HOME=$HOME/.eigenflux-codex/.eigenflux EIGENFLUX_HOST=codex EIGENFLUX_MODE=skill',
   '(shell commands do not inherit this server\'s env). Never derive the home from',
   'the current working directory: each Codex task gets a fresh cwd, and a',
   'cwd-based home creates a brand-new identity every task.',
@@ -284,6 +285,29 @@ function runCli(args, timeoutMs = 25000) {
   return spawnSync(BIN, args, { encoding: 'utf8', timeout: timeoutMs, maxBuffer: 10 * 1024 * 1024 });
 }
 
+let runtimeReportInFlight = false;
+function reportRuntime() {
+  if (runtimeReportInFlight) return;
+  runtimeReportInFlight = true;
+  try {
+    execFile(BIN, ['settings', 'push', '--mode', 'skill', ...serverArgs], {
+      encoding: 'utf8', timeout: 5000, maxBuffer: 1024 * 1024, env: { ...process.env },
+    }, (error, stdout) => {
+      runtimeReportInFlight = false;
+      if (error) {
+        log('settings report failed', typeof error.code === 'number' ? error.code : 'spawn_or_timeout');
+        return;
+      }
+      const status = stdout.includes('settings unchanged') ? 'unchanged'
+        : stdout.includes('settings reported') ? 'reported' : 'completed';
+      log(`settings ${status} (mode=skill)`);
+    });
+  } catch {
+    runtimeReportInFlight = false;
+    log('settings report failed', 'spawn_or_timeout');
+  }
+}
+
 const EXIT_AUTH_REQUIRED = 4;
 
 function toolText(text) {
@@ -299,6 +323,7 @@ function callTool(name) {
     if (r.status === EXIT_AUTH_REQUIRED) {
       return toolText(AUTH_INSTRUCTIONS);
     }
+    if (r.status === 0) reportRuntime();
     if (r.status === 0 && r.stdout && r.stdout.trim()) {
       return toolText(withProfileRefreshNudge(r.stdout.trim()));
     }

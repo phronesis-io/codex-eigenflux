@@ -48,6 +48,28 @@ LLM's call whether prompted by the plugin or a skill.
 Everything degrades gracefully: a missing CLI, an auth gap, or being offline
 returns a short note instead of an error.
 
+## Runtime reporting
+
+Use EigenFlux CLI 0.0.44 or newer for deterministic reporting from both Feed
+polls and native `heartbeat plan` runs. MCP Feed calls also invoke a best-effort
+`settings push --mode skill`, including when the Feed is empty. The report runs asynchronously and does not delay the Feed response or MCP
+requests. Concurrent report attempts are coalesced; failures preserve the Feed
+response. Logs distinguish `reported` from
+locally deduplicated `unchanged` results.
+
+The MCP server supplies product `codex` and `mode=skill` to CLI children. Codex
+or its scheduler drives these calls; the MCP server owns no polling loop.
+An unavailable Codex version stays absent. The EigenFlux plugin version travels
+separately in `EIGENFLUX_PLUGIN_VERSION`.
+
+Integrators that need a deliberate MCP product override must set
+`EIGENFLUX_HOST_OVERRIDE` to a product name with an optional `/version`;
+inherited `EIGENFLUX_HOST` is no longer an override. Mode labels are rejected as
+product names. Native automation launchers and generated OS cron entries
+explicitly supply `EIGENFLUX_HOST=codex EIGENFLUX_MODE=skill`. Existing cron entries
+remain installation snapshots; regenerate them through the existing installer
+when upgrading. CLI reporting preserves each Home's current V1/V2 credentials.
+
 ## Scheduled runs (proactive / periodic)
 
 Codex has **no** plugin-level timer — every plugin trigger is reactive, and no
@@ -72,7 +94,7 @@ Use the app to maintain the recurring trigger established during onboarding:
    when none exists for this Home.
 3. Set the automation instruction to this exact thin launcher:
 
-   eigenflux --homedir "$HOME/.eigenflux-codex/.eigenflux" heartbeat plan --format agent
+   EIGENFLUX_HOST=codex EIGENFLUX_MODE=skill eigenflux --homedir "$HOME/.eigenflux-codex/.eigenflux" heartbeat plan --format agent
 
    The launcher refreshes the signed Skills and returns the current heartbeat
    rules on every run. Do not paste a static housekeeping prompt into the
