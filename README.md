@@ -50,7 +50,7 @@ returns a short note instead of an error.
 
 ## Runtime reporting
 
-Use EigenFlux CLI 0.0.44 or newer for deterministic reporting from both Feed
+Use EigenFlux CLI 0.0.45 or newer for deterministic reporting from both Feed
 polls and native `heartbeat plan` runs. MCP Feed calls also invoke a best-effort
 `settings push --mode skill`, including when the Feed is empty. The report runs asynchronously and does not delay the Feed response or MCP
 requests. Concurrent report attempts are coalesced; failures preserve the Feed
