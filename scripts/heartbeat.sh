@@ -51,19 +51,20 @@ SINK_JS="$SCRIPT_DIR/../src/codex-sink.mjs"
 NODE_BIN="${NODE_BIN:-$(command -v node || true)}"
 # Runtime identity for the backend (X-Client-Host / X-Client-Model headers),
 # resolved at install time and baked into the cron env. Without these the
-# cron-driven beats are attributed to "terminal" with no model. Host version
-# comes from .codex-plugin/plugin.json (same source the MCP server uses); model
+# cron-driven beats are attributed to "terminal" with no model. The product
+# is Codex; its version is left unknown. The separate plugin version comes
+# from .codex-plugin/plugin.json. The model
 # is Codex's configured top-level `model = "..."` in ~/.codex/config.toml —
 # empty when unset (Codex's built-in default is unobservable), and an absent
 # header never clobbers the backend's last value. Re-run install after a
 # version bump or model change to refresh the baked values.
 PLUGIN_VER="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$SCRIPT_DIR/../.codex-plugin/plugin.json" 2>/dev/null | head -1)"
-EF_HOST="codex/${PLUGIN_VER:-0.0.0}"
+EF_HOST="codex"
 EF_MODEL="$(sed -n '/^[[:space:]]*\[/q; s/^[[:space:]]*model[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$HOME/.codex/config.toml" 2>/dev/null | head -1)"
 
 # Keep the scheduled task as a thin launcher. \`heartbeat plan\` refreshes the
 # signed Skills and returns the current rules on every run.
-HEARTBEAT_PROMPT='Run eigenflux --homedir "$HOME/.eigenflux-codex/.eigenflux" heartbeat plan --format agent and follow the returned plan for this unattended EigenFlux heartbeat. Finish silently unless the plan requires a genuinely relevant notification or user action.'
+HEARTBEAT_PROMPT='Run EIGENFLUX_HOST=codex EIGENFLUX_MODE=skill eigenflux --homedir "$HOME/.eigenflux-codex/.eigenflux" heartbeat plan --format agent and follow the returned plan for this unattended EigenFlux heartbeat. Finish silently unless the plan requires a genuinely relevant notification or user action.'
 
 # --with-sink is OPT-IN. By default the beat is the old, proven method: a direct
 # `codex exec` of the housekeeping prompt (no result sink). Opt in to also write
@@ -148,7 +149,7 @@ server_env=""
 # line (this string is spliced into CRON_CMD, which cron runs via a shell).
 [[ -n "$SERVER" ]] && server_env="EIGENFLUX_SERVER=$(printf '%q' "$SERVER") "
 # Runtime identity env for the direct-beat cron line (see EF_HOST/EF_MODEL above).
-host_env="EIGENFLUX_HOST=$(printf '%q' "$EF_HOST") EIGENFLUX_CHANNEL=codex "
+host_env="EIGENFLUX_HOST=$(printf '%q' "$EF_HOST") EIGENFLUX_MODE=skill EIGENFLUX_CHANNEL=codex EIGENFLUX_PLUGIN_VERSION=$(printf '%q' "$PLUGIN_VER") "
 [[ -n "$EF_MODEL" ]] && host_env+="EIGENFLUX_MODEL=$(printf '%q' "$EF_MODEL") "
 # Resolve the codex binary to an ABSOLUTE path at install time: cron runs with a
 # minimal PATH (/usr/bin:/bin), so a bare `codex` fails there — and desktop-app
@@ -203,6 +204,8 @@ set -u
 cd $q_project || exit 1
 export EIGENFLUX_HOME=$q_ef_home
 export EIGENFLUX_HOST=$q_host
+export EIGENFLUX_MODE=skill
+export EIGENFLUX_PLUGIN_VERSION=$(printf '%q' "$PLUGIN_VER")
 export EIGENFLUX_CHANNEL=codex
 $model_line
 # Hand the sink the SAME codex binary resolved at install time, so its own
@@ -238,7 +241,9 @@ without_ours() { current_crontab | grep -vF "$MARKER" || true; }
 case "$cmd" in
   print)
     echo "$CRON_LINE"
-    [[ -n "$WITH_SINK" ]] && echo "# --with-sink: runner ($RUNNER) holds the codex exec + sink pipeline; run 'install' to generate it"
+    if [[ -n "$WITH_SINK" ]]; then
+      echo "# --with-sink: runner ($RUNNER) holds the codex exec + sink pipeline; run 'install' to generate it"
+    fi
     ;;
   install)
     mkdir -p "$EF_HOME"
