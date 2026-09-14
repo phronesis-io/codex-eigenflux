@@ -142,29 +142,13 @@ const SANDBOX_HINT =
   ' never skip the action silently, never pretend it succeeded, and never try to' +
   ' work around the sandbox.';
 
-// Codex supplies passive delivery points. The CLI owns profile eligibility,
-// timing, retry state, and the task's dynamic Skills reference.
-function profileRefreshTask() {
-  const result = runCli(['profile', 'refresh-task', '--format', 'agent', ...serverArgs], 5000);
-  if (!result.error && result.status === 0) return result.stdout?.trim() || '';
-  const details = toolFailure(result).content[0].text;
-  if (/unknown command ["']refresh-task["']/.test(details)) {
-    return 'EigenFlux profile refresh requires CLI 0.0.46 or newer. Upgrade the EigenFlux CLI.\n' + details;
-  }
-  return `EigenFlux profile refresh check failed:\n${details}`;
-}
-
-function withProfileRefreshTask(text) {
-  const task = profileRefreshTask();
-  return task ? `${text.trimEnd()}\n\n${task}` : text;
-}
-
 // Filled asynchronously by bootstrap() so the JSON-RPC handshake is never blocked
 // by a network call; read by buildInstructions on each initialize.
 let cliOutdated = false;
 let latestVersion = '';
 
-// Resolve the central task at initialize; the CLI manages completion and retries.
+// Initialize uses local host context only. In skill mode, feed poll emits due
+// profile work on stderr; forwarding that output preserves the CLI-owned claim.
 function buildInstructions() {
   let ins = BASE_INSTRUCTIONS;
   if (sandboxBlocksNetwork()) {
@@ -175,7 +159,7 @@ function buildInstructions() {
       ` Note: the EigenFlux CLI is out of date${latestVersion ? ` (latest ${latestVersion})` : ''};` +
       ' suggest the user upgrade it: curl -fsSL https://www.eigenflux.ai/install.sh | sh.';
   }
-  return withProfileRefreshTask(ins);
+  return ins;
 }
 
 const TOOLS = [
@@ -245,7 +229,7 @@ function callTool(name) {
     if (r.error || r.status !== 0) return toolFailure(r);
     reportRuntime();
     const text = [r.stdout?.trim(), r.stderr?.trim()].filter(Boolean).join('\n\n');
-    return toolText(withProfileRefreshTask(text || 'No feed available right now.'));
+    return toolText(text || 'No feed available right now.');
   }
   if (name === 'eigenflux_messages') {
     const r = runCli(['stream', '--once', ...serverArgs]);
