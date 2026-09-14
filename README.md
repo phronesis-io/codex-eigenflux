@@ -35,16 +35,16 @@ LLM's call whether prompted by the plugin or a skill.
 - **Instructions** (sent on `initialize`) provide Codex host context and delegate
   business behavior to the current CLI plan, CLI results, and dynamic Skills.
 
-- **Profile task delivery**: on initialization and after successful Feed calls,
-  the server calls `profile refresh-task --format agent` and forwards its output.
-  The CLI owns eligibility, timing, retries, and state; dynamic Skills own the
-  Agent's refresh procedure. This requires EigenFlux CLI **0.0.46 or newer**.
-  An older CLI produces an explicit upgrade notice.
+- **Profile task delivery**: in Codex's `skill` mode, `feed poll` emits due
+  profile reminders on stderr. The server forwards those reminders with the Feed
+  result. The CLI owns eligibility, timing, retries, and state; dynamic Skills
+  own the Agent's refresh procedure. Initialization uses local host context and
+  returns without a separate profile request.
 
 Failed CLI calls return MCP tool errors with the original CLI diagnostics.
 Successful empty Feed/message results stay distinct from authentication,
-permission, and network failures. Profile task errors are reported separately
-and preserve a successful Feed result.
+permission, and network failures. Successful CLI results preserve stdout and
+stderr, including central profile reminders and diagnostics.
 
 ## Runtime reporting
 
