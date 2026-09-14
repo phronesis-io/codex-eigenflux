@@ -1,99 +1,33 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-const source = readFileSync(new URL('./mcp-server.mjs', import.meta.url), 'utf8');
-const nudgeStart = source.indexOf('function profileRefreshInstruction()');
-const nudgeEnd = source.indexOf('\n}\n\nfunction withProfileRefreshNudge', nudgeStart);
-const nudge = source.slice(nudgeStart, nudgeEnd);
-
-test('periodic profile nudge only triggers the canonical skill procedure', () => {
-  assert.ok(nudge.includes('EigenFlux periodic profile refresh is due'));
-  assert.ok(nudge.includes('ef-profile skill'));
-  assert.ok(nudge.includes('Periodic Profile Refresh'));
-  assert.ok(nudge.includes('only source of truth'));
-  for (const duplicatedContract of [
-    'profile refresh-context',
-    'profile patch',
-    'profile refresh-complete',
-    'settings push',
-    'KEEP, UPDATE, CLEAR, or UNKNOWN',
-    'current_focus',
-    'network_goal',
-    'human_status',
-  ]) {
-    assert.ok(!nudge.includes(duplicatedContract), duplicatedContract);
-  }
-});
-
-test('nudge completion follows CLI refresh/check stamps and retries failures', () => {
-  assert.ok(source.includes("runCli(['profile', 'refresh-status', '-f', 'json'"));
-  assert.ok(source.includes('status.last_touch_unix'));
-  assert.ok(source.includes('status.state_scope'));
-  assert.ok(!source.includes("servers', serverName, 'credentials.json"));
-  assert.ok(source.includes('PROFILE_NUDGE_RETRY_MS'));
-  assert.ok(source.includes('lastProfileCompletionMs()'));
-  assert.ok(source.includes('withProfileRefreshNudge(r.stdout.trim())'));
-});
-
-test('nudge is separated from the fenced feed without duplicating CLI contracts', () => {
-  assert.ok(source.includes('`${text.trimEnd()}\\n\\n${profileRefreshInstruction().trimStart()}`'));
-  assert.ok(!source.includes('MIN_PROFILE_CLI_VERSION'));
-  assert.ok(!source.includes('profileCliPrefix()'));
-});
-
-test('feed tool emits only the canonical skill refresh trigger', () => {
-  const home = mkdtempSync(join(tmpdir(), 'codex-eigenflux-nudge-'));
-  const fakeCLI = join(home, 'eigenflux');
-  writeFileSync(fakeCLI, `#!/bin/sh
-case "$*" in
-  "profile refresh-status -f json -s staging")
-    printf '%s\\n' '{"server":"staging","agent_id":"42","state_scope":"scope42","last_touch_unix":0}' ;;
-  "version --short") printf '%s\\n' '0.0.29' ;;
-  "feed poll -f agent -s staging") printf '%s\\n' 'FEED_PAYLOAD' ;;
-  "doctor -f json") printf '%s\\n' '{"outdated":false}' ;;
-  *) exit 0 ;;
-esac
-`, { mode: 0o700 });
-  chmodSync(fakeCLI, 0o700);
-
-  const request = JSON.stringify({
-    jsonrpc: '2.0',
-    id: 1,
-    method: 'tools/call',
-    params: { name: 'eigenflux_feed', arguments: {} },
-  }) + '\n';
-  const run = spawnSync(process.execPath, [fileURLToPath(new URL('./mcp-server.mjs', import.meta.url))], {
-    input: request,
-    encoding: 'utf8',
-    env: {
-      ...process.env,
-      HOME: home,
-      EIGENFLUX_HOME: join(home, '.eigenflux'),
-      EIGENFLUX_BIN: fakeCLI,
-      EIGENFLUX_SERVER: 'staging',
-    },
-  });
-  assert.equal(run.status, 0, run.stderr);
-  const response = JSON.parse(run.stdout.trim());
-  const text = response.result.content[0].text;
-  assert.match(text, /^FEED_PAYLOAD/);
-  assert.match(text, /EigenFlux periodic profile refresh is due/);
-  assert.match(text, /ef-profile skill/);
-  assert.doesNotMatch(text, /profile refresh-context/);
-  assert.doesNotMatch(text, /profile patch/);
-});
-
-function runEntryRequests({ missingCLI = false, cliExitCode = 0 } = {}) {
+function runEntryRequests({ missingCLI = false, cliExitCode = 0, stdout = '', stderr = '', profileResults = [] } = {}) {
   const testRoot = mkdtempSync(join(tmpdir(), 'codex-eigenflux-entry-'));
   const fakeCLI = join(testRoot, 'mock-eigenflux');
   try {
     if (!missingCLI) {
-      writeFileSync(fakeCLI, `#!/bin/sh\nexit ${cliExitCode}\n`, { mode: 0o700 });
+      writeFileSync(fakeCLI, `#!${process.execPath}
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+let result = {stdout: '', stderr: '', status: 0};
+if (args[0] === 'feed' || args[0] === 'stream') {
+  result = ${JSON.stringify({ stdout, stderr, status: cliExitCode })};
+}
+if (JSON.stringify(args) === JSON.stringify(['profile', 'refresh-task', '--format', 'agent', '-s', 'staging'])) {
+  const counter = ${JSON.stringify(join(testRoot, 'profile-count'))};
+  const count = fs.existsSync(counter) ? Number(fs.readFileSync(counter, 'utf8')) : 0;
+  fs.writeFileSync(counter, String(count + 1));
+  result = ${JSON.stringify(profileResults)}[count] || result;
+}
+process.stdout.write(result.stdout || '');
+process.stderr.write(result.stderr || '');
+process.exit(result.status || 0);
+`, { mode: 0o700 });
     }
     const requests = [
       { jsonrpc: '2.0', id: 1, method: 'initialize', params: {} },
@@ -123,6 +57,42 @@ function runEntryRequests({ missingCLI = false, cliExitCode = 0 } = {}) {
   }
 }
 
+test('initialize and successful Feed calls forward fresh central profile tasks', () => {
+  const [initialized, feed] = runEntryRequests({
+    stdout: 'FEED_PAYLOAD',
+    profileResults: [{stdout: 'CENTRAL_INITIAL_TASK'}, {stdout: 'CENTRAL_FEED_TASK'}],
+  });
+  assert.match(initialized.instructions, /CENTRAL_INITIAL_TASK$/);
+  assert.equal(feed.content[0].text, 'FEED_PAYLOAD\n\nCENTRAL_FEED_TASK');
+  assert.equal(feed.isError, undefined);
+});
+
+test('a central empty task adds no profile instructions to successful results', () => {
+  const [, feed, messages] = runEntryRequests();
+  assert.equal(feed.content[0].text, 'No feed available right now.');
+  assert.equal(messages.content[0].text, 'No offline messages.');
+  assert.equal(feed.isError, undefined);
+  assert.equal(messages.isError, undefined);
+});
+
+test('profile errors preserve a successful Feed result and expose central diagnostics', () => {
+  const [, feed] = runEntryRequests({
+    stdout: 'FEED_PAYLOAD',
+    profileResults: [{}, {status: 2, stderr: 'CENTRAL_PROFILE_ERROR'}],
+  });
+  assert.equal(feed.content[0].text, 'FEED_PAYLOAD\n\nEigenFlux profile refresh check failed:\nCENTRAL_PROFILE_ERROR');
+  assert.equal(feed.isError, undefined);
+});
+
+test('an older CLI produces an upgrade notice instead of a local profile fallback', () => {
+  const error = {status: 2, stderr: 'unknown command "refresh-task" for "eigenflux profile"'};
+  const [initialized, feed] = runEntryRequests({profileResults: [error, error]});
+  for (const text of [initialized.instructions, feed.content[0].text]) {
+    assert.match(text, /requires CLI 0\.0\.46 or newer/);
+    assert.match(text, /unknown command "refresh-task"/);
+  }
+});
+
 const installDoc = 'https://github.com/phronesis-io/eigenflux/blob/main/skills/install.md';
 
 test('missing CLI responses and sandbox setup use the canonical installation document', () => {
@@ -134,6 +104,7 @@ test('missing CLI responses and sandbox setup use the canonical installation doc
   assert.match(initialized.instructions, /ef-profile for existing-account recovery/);
   assert.doesNotMatch(initialized.instructions, /install\.sh/);
   for (const result of [feed, messages]) {
+    assert.equal(result.isError, true);
     const text = result.content[0].text;
     assert.ok(text.includes(installDoc));
     assert.match(text, /host codex/);
@@ -144,17 +115,33 @@ test('missing CLI responses and sandbox setup use the canonical installation doc
   assert.deepEqual(feed, messages);
 });
 
-test('both unauthenticated tools distinguish first-time onboarding from account recovery', () => {
+for (const cliExitCode of [2, 4, 7]) {
+  test(`CLI failure ${cliExitCode} preserves central details and is marked as an MCP tool error`, () => {
+    const [, feed, messages] = runEntryRequests({
+      cliExitCode,
+      stdout: 'CENTRAL_RESULT',
+      stderr: 'CENTRAL_ERROR: capability unavailable; Feed remains available',
+    });
+    for (const result of [feed, messages]) {
+      assert.equal(result.isError, true);
+      assert.equal(result.content[0].text, 'CENTRAL_RESULT\n\nCENTRAL_ERROR: capability unavailable; Feed remains available');
+    }
+  });
+}
+
+test('a CLI failure without diagnostics still reports the failure', () => {
   const [, feed, messages] = runEntryRequests({ cliExitCode: 4 });
   for (const result of [feed, messages]) {
-    const text = result.content[0].text;
-    assert.match(text, /installed ef-onboarding skill for first-time onboarding/);
-    assert.match(text, /ef-profile for existing-account recovery/);
-    assert.match(text, /EIGENFLUX_HOME/);
-    assert.match(text, /\$HOME\/\.eigenflux-codex\/\.eigenflux/);
-    assert.doesNotMatch(text, /auth login|ef-profile skill for onboarding/);
+    assert.equal(result.isError, true);
+    assert.equal(result.content[0].text, 'EigenFlux CLI exited with status 4.');
   }
-  assert.deepEqual(feed, messages);
+});
+
+test('initialize defers business decisions to the current plan and dynamic Skills', () => {
+  const [initialized] = runEntryRequests({ missingCLI: true });
+  assert.match(initialized.instructions, /heartbeat plan --format agent/);
+  assert.match(initialized.instructions, /dynamically synced ef-\* Skills/);
+  assert.doesNotMatch(initialized.instructions, /call `eigenflux_feed`|`eigenflux_messages` to fetch|Powered by EigenFlux/);
 });
 
 test('README delegates installation while preserving Codex plugin configuration', () => {
@@ -168,4 +155,12 @@ test('README delegates installation while preserving Codex plugin configuration'
   assert.match(install, /Enable the MCP server/);
   assert.match(install, /EIGENFLUX_HOME/);
   assert.doesNotMatch(install, /curl|auth login/);
+});
+
+test('successful CLI diagnostics retain a ride-along profile reminder', () => {
+  const [, feed, messages] = runEntryRequests({stdout: 'PAYLOAD', stderr: '[PENDING TASK] Your EigenFlux profile is due for a refresh.'});
+  for (const result of [feed, messages]) {
+    assert.equal(result.isError, undefined);
+    assert.equal(result.content[0].text, 'PAYLOAD\n\n[PENDING TASK] Your EigenFlux profile is due for a refresh.');
+  }
 });

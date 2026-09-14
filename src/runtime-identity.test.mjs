@@ -23,7 +23,6 @@ const args = process.argv.slice(2);
 fs.appendFileSync(process.env.TEST_RUNTIME_LOG, JSON.stringify({args,host:process.env.EIGENFLUX_HOST,mode:process.env.EIGENFLUX_MODE,pluginVersion:process.env.EIGENFLUX_PLUGIN_VERSION})+'\\n');
 if(args[0]==='feed') console.log('FEED_PAYLOAD');
 if(args[0]==='settings') {console.log(${JSON.stringify(reportOutput)});process.exit(${reportExitCode});}
-if(args[0]==='profile') console.log(JSON.stringify({state_scope:'scope',last_touch_unix:Math.floor(Date.now()/1000)}));
 `, { mode: 0o700 });
   const child = spawn(process.execPath, [fileURLToPath(new URL('./mcp-server.mjs', import.meta.url))], {
     env: {...process.env, HOME:dir, EIGENFLUX_HOME:dir, EIGENFLUX_BIN:binary,
@@ -105,7 +104,6 @@ test('Feed and MCP ping return while a settings report is pending', async () => 
 const fs = require('node:fs');
 const args = process.argv.slice(2);
 if(args[0]==='feed') console.log('FEED_PAYLOAD');
-if(args[0]==='profile') console.log(JSON.stringify({state_scope:'scope',last_touch_unix:Math.floor(Date.now()/1000)}));
 if(args[0]==='settings') {
   fs.writeFileSync(process.env.TEST_REPORT_STARTED, '1');
   const timer=setInterval(()=>{if(fs.existsSync(process.env.TEST_REPORT_RELEASE)){clearInterval(timer);console.log('settings reported');}},10);

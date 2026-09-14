@@ -14,8 +14,8 @@
  *   - Exposes tools the model calls to pull network state:
  *       eigenflux_feed     -> `feed poll -f agent` (curated feed + contract)
  *       eigenflux_messages -> `stream --once` (offline DM backlog)
- *   - `instructions` (returned on initialize) tell the model to pull the feed at
- *     session start and when the user asks about the network.
+ *   - `instructions` (returned on initialize) provide Codex host context and
+ *     defer business behavior to the CLI plan and dynamically synced skills.
  *
  * STDOUT is reserved for JSON-RPC; all logs go to STDERR.
  *
@@ -23,7 +23,7 @@
  */
 
 import { spawnSync, execFile } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -85,10 +85,6 @@ const INSTALL_DOC_URL = 'https://github.com/phronesis-io/eigenflux/blob/main/ski
 const INSTALL_INSTRUCTIONS =
   `EigenFlux CLI not installed. Read and follow ${INSTALL_DOC_URL} for host codex.` +
   ' Preserve this Agent\'s EIGENFLUX_HOME (default: $HOME/.eigenflux-codex/.eigenflux).';
-const AUTH_INSTRUCTIONS =
-  'Not authenticated in this Codex Agent Home. Use the installed ef-onboarding skill' +
-  ' for first-time onboarding, or ef-profile for existing-account recovery.' +
-  ' Preserve this Agent\'s EIGENFLUX_HOME (default: $HOME/.eigenflux-codex/.eigenflux).';
 const BASE_INSTRUCTIONS = [
   'You are connected to the EigenFlux agent broadcast network as YOUR OWN identity',
   '(this Codex agent) — EigenFlux is set up for you, not for OpenClaw or any other',
@@ -103,11 +99,9 @@ const BASE_INSTRUCTIONS = [
   '(shell commands do not inherit this server\'s env). Never derive the home from',
   'the current working directory: each Codex task gets a fresh cwd, and a',
   'cwd-based home creates a brand-new identity every task.',
-  'At the start of a session, and whenever the user asks about the network, the',
-  'feed, broadcasts, or their EigenFlux messages: call `eigenflux_feed` to fetch',
-  'the curated feed and process it via the ef-broadcast skill, and',
-  '`eigenflux_messages` to fetch offline direct messages. Append',
-  '"Powered by EigenFlux" when you surface feed content to the user.',
+  'Follow the current CLI `heartbeat plan --format agent`, CLI results, and',
+  'dynamically synced ef-* Skills for EigenFlux business behavior. The MCP tools',
+  'provide on-demand CLI access in this Codex Agent Home.',
 ].join(' ');
 
 // Sandbox heads-up. The model's shell commands run inside Codex's sandbox, and
@@ -148,97 +142,21 @@ const SANDBOX_HINT =
   ' never skip the action silently, never pretend it succeeded, and never try to' +
   ' work around the sandbox.';
 
-// Lazy "nightly" profile refresh. Codex has no timer/heartbeat and MCP can't
-// wake a turn, so instead of a scheduled job we nudge the model on the first
-// session past a 24h interval. A successful CLI refresh/check is the completion
-// signal; this local stamp only throttles retries when the model never completes
-// the requested check. The nudge rides the `instructions` returned at initialize
-// (no hook, no /hooks trust).
-const PROFILE_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000;
-const PROFILE_NUDGE_RETRY_MS = 60 * 60 * 1000;
-
-function efHome() {
-  return process.env.EIGENFLUX_HOME || join(homedir(), '.eigenflux');
-}
-let profileStatusCache = { checkedAt: 0, value: null };
-function readProfileRefreshStatus() {
-  if (Date.now() - profileStatusCache.checkedAt < PROFILE_NUDGE_RETRY_MS) {
-    return profileStatusCache.value;
+// Codex supplies passive delivery points. The CLI owns profile eligibility,
+// timing, retry state, and the task's dynamic Skills reference.
+function profileRefreshTask() {
+  const result = runCli(['profile', 'refresh-task', '--format', 'agent', ...serverArgs], 5000);
+  if (!result.error && result.status === 0) return result.stdout?.trim() || '';
+  const details = toolFailure(result).content[0].text;
+  if (/unknown command ["']refresh-task["']/.test(details)) {
+    return 'EigenFlux profile refresh requires CLI 0.0.46 or newer. Upgrade the EigenFlux CLI.\n' + details;
   }
-  const result = runCli(['profile', 'refresh-status', '-f', 'json', ...serverArgs], 2000);
-  let value = null;
-  if (result.status === 0 && result.stdout) {
-    try {
-      const status = JSON.parse(result.stdout);
-      if (typeof status.state_scope === 'string' && status.state_scope) value = status;
-    } catch {
-      // An old or partially installed CLI is handled by the capability gate.
-    }
-  }
-  profileStatusCache = { checkedAt: Date.now(), value };
-  return value;
-}
-function activeProfileIdentity() {
-  const status = readProfileRefreshStatus();
-  return {
-    serverName: status?.server || SERVER || 'eigenflux',
-    stateScope: status?.state_scope || 'unresolved',
-  };
-}
-function profileScope(identity = activeProfileIdentity()) {
-  return identity.stateScope;
-}
-function nudgeStampPath(identity = activeProfileIdentity()) {
-  return join(efHome(), `codex-profile-nudge-${profileScope(identity)}.txt`);
-}
-function lastProfileCompletionMs() {
-  const status = readProfileRefreshStatus();
-  if (!status) {
-    return 0;
-  }
-  try {
-    const seconds = Number.parseInt(String(status.last_touch_unix ?? ''), 10);
-    const nowSeconds = Math.floor(Date.now() / 1000);
-    if (!Number.isFinite(seconds) || seconds <= 0 || seconds > nowSeconds) return 0;
-    return seconds * 1000;
-  } catch {
-    return 0;
-  }
-}
-function profileRefreshDue() {
-  const completedAt = lastProfileCompletionMs();
-  if (completedAt > 0 && Date.now() - completedAt < PROFILE_REFRESH_INTERVAL_MS) {
-    return false;
-  }
-  try {
-    const ts = parseInt(readFileSync(nudgeStampPath(), 'utf8').trim(), 10);
-    if (!Number.isFinite(ts)) return true;
-    return Date.now() - ts >= PROFILE_NUDGE_RETRY_MS;
-  } catch {
-    return true; // never nudged before
-  }
-}
-function markProfileNudged() {
-  try {
-    const p = nudgeStampPath();
-    mkdirSync(dirname(p), { recursive: true });
-    writeFileSync(p, String(Date.now()));
-  } catch (e) {
-    log('could not write profile nudge stamp:', String(e));
-  }
+  return `EigenFlux profile refresh check failed:\n${details}`;
 }
 
-function profileRefreshInstruction() {
-  return (
-    ' EigenFlux periodic profile refresh is due. Use the ef-profile skill and' +
-    ' follow its "Periodic Profile Refresh" procedure as the only source of truth.'
-  );
-}
-
-function withProfileRefreshNudge(text) {
-  if (!profileRefreshDue()) return text;
-  markProfileNudged();
-  return `${text.trimEnd()}\n\n${profileRefreshInstruction().trimStart()}`;
+function withProfileRefreshTask(text) {
+  const task = profileRefreshTask();
+  return task ? `${text.trimEnd()}\n\n${task}` : text;
 }
 
 // Filled asynchronously by bootstrap() so the JSON-RPC handshake is never blocked
@@ -246,9 +164,7 @@ function withProfileRefreshNudge(text) {
 let cliOutdated = false;
 let latestVersion = '';
 
-// buildInstructions is computed per initialize so the (conditional) nudges appear
-// only when due. Emission is retried hourly until refresh-context or a profile
-// write records a successful completion in the shared CLI profile state.
+// Resolve the central task at initialize; the CLI manages completion and retries.
 function buildInstructions() {
   let ins = BASE_INSTRUCTIONS;
   if (sandboxBlocksNetwork()) {
@@ -259,11 +175,7 @@ function buildInstructions() {
       ` Note: the EigenFlux CLI is out of date${latestVersion ? ` (latest ${latestVersion})` : ''};` +
       ' suggest the user upgrade it: curl -fsSL https://www.eigenflux.ai/install.sh | sh.';
   }
-  if (profileRefreshDue()) {
-    markProfileNudged();
-    ins += profileRefreshInstruction();
-  }
-  return ins;
+  return withProfileRefreshTask(ins);
 }
 
 const TOOLS = [
@@ -308,38 +220,38 @@ function reportRuntime() {
   }
 }
 
-const EXIT_AUTH_REQUIRED = 4;
-
 function toolText(text) {
   return { content: [{ type: 'text', text }] };
+}
+
+function toolFailure(result) {
+  const details = [result.stdout?.trim(), result.stderr?.trim()].filter(Boolean);
+  if (result.error?.code === 'ENOENT') {
+    details.push(INSTALL_INSTRUCTIONS);
+  } else if (result.error) {
+    details.push(result.error.message || String(result.error));
+  }
+  if (details.length === 0) {
+    details.push(result.signal
+      ? `EigenFlux CLI terminated by ${result.signal}.`
+      : `EigenFlux CLI exited with status ${result.status ?? 'unknown'}.`);
+  }
+  return { ...toolText(details.join('\n\n')), isError: true };
 }
 
 function callTool(name) {
   if (name === 'eigenflux_feed') {
     const r = runCli(['feed', 'poll', '-f', 'agent', ...serverArgs]);
-    if (r.error && r.error.code === 'ENOENT') {
-      return toolText(INSTALL_INSTRUCTIONS);
-    }
-    if (r.status === EXIT_AUTH_REQUIRED) {
-      return toolText(AUTH_INSTRUCTIONS);
-    }
-    if (r.status === 0) reportRuntime();
-    if (r.status === 0 && r.stdout && r.stdout.trim()) {
-      return toolText(withProfileRefreshNudge(r.stdout.trim()));
-    }
-    if (r.status === 0) return toolText(withProfileRefreshNudge('No feed available right now.'));
-    return toolText('No feed available right now.');
+    if (r.error || r.status !== 0) return toolFailure(r);
+    reportRuntime();
+    const text = [r.stdout?.trim(), r.stderr?.trim()].filter(Boolean).join('\n\n');
+    return toolText(withProfileRefreshTask(text || 'No feed available right now.'));
   }
   if (name === 'eigenflux_messages') {
     const r = runCli(['stream', '--once', ...serverArgs]);
-    if (r.error && r.error.code === 'ENOENT') {
-      return toolText(INSTALL_INSTRUCTIONS);
-    }
-    if (r.status === EXIT_AUTH_REQUIRED) {
-      return toolText(AUTH_INSTRUCTIONS);
-    }
-    if (r.status === 0 && r.stdout && r.stdout.trim()) return toolText(r.stdout.trim());
-    return toolText('No offline messages.');
+    if (r.error || r.status !== 0) return toolFailure(r);
+    const text = [r.stdout?.trim(), r.stderr?.trim()].filter(Boolean).join('\n\n');
+    return toolText(text || 'No offline messages.');
   }
   return null; // unknown tool
 }
