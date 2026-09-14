@@ -53,14 +53,13 @@ NODE_BIN="${NODE_BIN:-$(command -v node || true)}"
 # resolved at install time and baked into the cron env. Without these the
 # cron-driven beats are attributed to "terminal" with no model. The product
 # is Codex; its version is left unknown. The separate plugin version comes
-# from .codex-plugin/plugin.json. The model
-# is Codex's configured top-level `model = "..."` in ~/.codex/config.toml —
-# empty when unset (Codex's built-in default is unobservable), and an absent
-# header never clobbers the backend's last value. Re-run install after a
-# version bump or model change to refresh the baked values.
+# from .codex-plugin/plugin.json. Preserve only an explicit EIGENFLUX_MODEL;
+# configured defaults do not identify the model executing a turn. Skills pass
+# a known current model on each CLI command. Re-run install to change an
+# explicit model override baked into the runner.
 PLUGIN_VER="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$SCRIPT_DIR/../.codex-plugin/plugin.json" 2>/dev/null | head -1)"
 EF_HOST="codex"
-EF_MODEL="$(sed -n '/^[[:space:]]*\[/q; s/^[[:space:]]*model[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$HOME/.codex/config.toml" 2>/dev/null | head -1)"
+EF_MODEL="${EIGENFLUX_MODEL:-}"
 
 # Keep the scheduled task as a thin launcher. \`heartbeat plan\` refreshes the
 # signed Skills and returns the current rules on every run.

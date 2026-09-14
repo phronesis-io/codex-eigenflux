@@ -54,22 +54,9 @@ process.env.EIGENFLUX_MODE = 'skill';
 process.env.EIGENFLUX_PLUGIN_VERSION = PLUGIN_VERSION;
 process.env.EIGENFLUX_CHANNEL ||= 'codex';
 
-// Model identity (X-Client-Model header on every CLI request, persisted by the
-// backend off the heartbeat feed pull). Deterministic best-effort: Codex's
-// configured default from the top-level `model = "..."` in ~/.codex/config.toml.
-// Unresolvable (no file, no key, or Codex running its built-in default) leaves
-// the env unset — an absent header never clobbers the backend's last value.
-if (!process.env.EIGENFLUX_MODEL) {
-  try {
-    const toml = readFileSync(join(homedir(), '.codex', 'config.toml'), 'utf8');
-    // Top-level scope only: everything before the first [section] header.
-    const topLevel = toml.split(/^\s*\[/m)[0];
-    const m = topLevel.match(/^\s*model\s*=\s*"([^"]+)"/m);
-    if (m) process.env.EIGENFLUX_MODEL = m[1];
-  } catch {
-    // no config.toml — Codex is on its built-in default we cannot observe
-  }
-}
+// Preserve an explicit EIGENFLUX_MODEL only. MCP does not expose the current
+// turn's model; config.toml describes a default, not the model making this call.
+// Skills pass known current models on their CLI requests.
 
 // Stable per-runtime identity home for Codex. A dedicated top-level dir — NOT
 // inside ~/.codex (Codex owns it and may clean it) and NEVER a task's cwd (each

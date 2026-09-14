@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync, spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -13,21 +13,23 @@ test('unknown Codex product version is never borrowed from the plugin', () => {
   assert.throws(() => resolveRuntimeHost('terminal'), /EIGENFLUX_HOST_OVERRIDE/);
 });
 
-async function runFeed(reportExitCode, reportOutput = 'settings reported') {
+async function runFeed(reportExitCode, reportOutput = 'settings reported', model = '') {
   const dir = mkdtempSync(join(tmpdir(), 'codex-runtime-'));
   const binary = join(dir, 'eigenflux');
   const logfile = join(dir, 'calls.jsonl');
+  mkdirSync(join(dir, '.codex'));
+  writeFileSync(join(dir, '.codex', 'config.toml'), 'model = "configured-default"\n');
   writeFileSync(binary, `#!${process.execPath}
 const fs = require('node:fs');
 const args = process.argv.slice(2);
-fs.appendFileSync(process.env.TEST_RUNTIME_LOG, JSON.stringify({args,host:process.env.EIGENFLUX_HOST,mode:process.env.EIGENFLUX_MODE,pluginVersion:process.env.EIGENFLUX_PLUGIN_VERSION})+'\\n');
+fs.appendFileSync(process.env.TEST_RUNTIME_LOG, JSON.stringify({args,host:process.env.EIGENFLUX_HOST,mode:process.env.EIGENFLUX_MODE,model:process.env.EIGENFLUX_MODEL,pluginVersion:process.env.EIGENFLUX_PLUGIN_VERSION})+'\\n');
 if(args[0]==='feed') console.log('FEED_PAYLOAD');
 if(args[0]==='settings') {console.log(${JSON.stringify(reportOutput)});process.exit(${reportExitCode});}
 `, { mode: 0o700 });
   const child = spawn(process.execPath, [fileURLToPath(new URL('./mcp-server.mjs', import.meta.url))], {
     env: {...process.env, HOME:dir, EIGENFLUX_HOME:dir, EIGENFLUX_BIN:binary,
       EIGENFLUX_SERVER:'staging', EIGENFLUX_HOST:'openclaw/old-plugin',
-      EIGENFLUX_HOST_OVERRIDE:'', EIGENFLUX_MODE:'plugin', TEST_RUNTIME_LOG:logfile},
+      EIGENFLUX_HOST_OVERRIDE:'', EIGENFLUX_MODE:'plugin', EIGENFLUX_MODEL:model, TEST_RUNTIME_LOG:logfile},
     stdio:['pipe','pipe','pipe'],
   });
   const result = {stdout:'',stderr:''};
@@ -64,6 +66,32 @@ test('MCP feed children get current product and skill mode, and report determini
   assert.equal(reports[0].pluginVersion, JSON.parse(readFileSync(new URL('../package.json', import.meta.url))).version);
   assert.equal(JSON.parse(result.stdout).result.content[0].text, 'FEED_PAYLOAD');
 });
+
+for (const model of ['', 'actual-current-model']) {
+  test(`Feed and settings children use only an explicitly supplied model: ${model || 'unknown'}`, async () => {
+    const { calls } = await runFeed(0, 'settings reported', model);
+    for (const command of ['feed', 'settings']) {
+      assert.equal(calls.find(call => call.args[0] === command).model, model);
+    }
+  });
+
+  test(`headless heartbeat does not infer a model from config: ${model || 'unknown'}`, () => {
+    const home = mkdtempSync(join(tmpdir(), 'codex-cron-model-'));
+    mkdirSync(join(home, '.codex'));
+    writeFileSync(join(home, '.codex', 'config.toml'), 'model = "configured-default"\n');
+    try {
+      const result = spawnSync('bash', [fileURLToPath(new URL('../scripts/heartbeat.sh', import.meta.url)), 'print', '--every', '15'], {
+        encoding: 'utf8', env: { ...process.env, HOME: home, CODEX_BIN: process.execPath, EIGENFLUX_MODEL: model },
+      });
+      assert.equal(result.status, 0, result.stderr);
+      assert.doesNotMatch(result.stdout, /configured-default/);
+      if (model) assert.match(result.stdout, /EIGENFLUX_MODEL=actual-current-model/);
+      else assert.doesNotMatch(result.stdout, /EIGENFLUX_MODEL=/);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+}
 
 test('a report failure preserves the successful Feed response', async () => {
   const {result} = await runFeed(4, '');
