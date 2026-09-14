@@ -48,6 +48,12 @@ stderr, including central profile reminders and diagnostics.
 
 ## Runtime reporting
 
+MCP does not provide the current turn's model. The plugin and headless runner
+preserve only an explicit `EIGENFLUX_MODEL`; they do not infer one from
+`config.toml`. Skills pass a known current model on each CLI request. The CLI
+sends `X-Client-Model`; the stored and displayed field is `model`. Unknown
+models remain absent.
+
 Use EigenFlux CLI 0.0.45 or newer for deterministic reporting from both Feed
 polls and native `heartbeat plan` runs. MCP Feed calls also invoke a best-effort
 `settings push --mode skill`, including when the Feed is empty. The report runs asynchronously and does not delay the Feed response or MCP
