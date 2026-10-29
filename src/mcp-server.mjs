@@ -314,12 +314,31 @@ function execAsync(args, cb) {
 }
 
 function bootstrap() {
-  execAsync(['skills', 'sync', '--quiet', '--if-stale', '--host', 'codex'], (err) => {
+  execAsync(['skills', 'sync', '--quiet', '--if-stale', '--host', 'codex', '--format', 'json'], (err, stdout) => {
     if (err && err.code === 'ENOENT') {
       log('eigenflux CLI not installed; tools will report install instructions');
       return; // nothing else works without the CLI
     }
-    log('skills sync done');
+    if (err) {
+      log('skills sync failed', typeof err.code === 'number' ? `exit=${err.code}` : 'spawn_or_timeout');
+    } else {
+      try {
+        const result = JSON.parse(stdout);
+        if (typeof result?.verified_manifest !== 'boolean') throw new Error('invalid result');
+        const preserved = Array.isArray(result.preserved) ? result.preserved.length : 0;
+        const diagnostics = Array.isArray(result.diagnostics) ? result.diagnostics.length : 0;
+        if (result.verified_manifest && !preserved && !diagnostics && !result.no_network) {
+          log('skills sync verified');
+        } else {
+          // Quiet CLI fallback can exit successfully while keeping old or edited
+          // content. Log only fixed labels/counts, never diagnostic text or paths.
+          log('skills sync incomplete', `verified=${result.verified_manifest}`,
+            `preserved=${preserved}`, `diagnostics=${diagnostics}`, `no_network=${result.no_network === true}`);
+        }
+      } catch {
+        log('skills sync result unavailable');
+      }
+    }
     // Best-effort version/outdated check for the instruction nudge.
     execAsync(['doctor', '-f', 'json'], (derr, stdout) => {
       if (derr && !stdout) return; // doctor exits non-zero on issues but still prints JSON
